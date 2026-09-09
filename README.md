@@ -70,4 +70,4 @@ Pages 하위 경로는 자동으로 적용한다. 로컬에서 동일한 경로�
 PAGES_BASE_PATH=/schedule-parser npm run app:build
 ```
 
-기본 빌드는 루트 경로를 사용한다. 배포는 수동 실행 방식이다.
+기본 빌드는 루트 경로를 사용한다. main에 push하면 자동 배포하며 수동 실행도 가능하다.
