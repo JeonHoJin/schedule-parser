@@ -49,6 +49,7 @@ export function ShiftDetailScreen({ date, onBack }: { date: IsoDate; onBack: () 
             hint="나에게 인계"
             group={chain.previous}
             showDate={chain.previous.date !== date}
+            myTeam={chain.myTeam}
           />
           <WorkerList title="동시간 근무자" hint="함께 근무" group={chain.concurrent} />
           <WorkerList
@@ -56,6 +57,7 @@ export function ShiftDetailScreen({ date, onBack }: { date: IsoDate; onBack: () 
             hint="내가 인계"
             group={chain.next}
             showDate={chain.next.date !== date}
+            myTeam={chain.myTeam}
           />
         </View>
       )}

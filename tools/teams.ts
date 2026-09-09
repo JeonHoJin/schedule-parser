@@ -1,13 +1,12 @@
 /**
  * 팀 배정 · 인계 상대 규칙 검증.
  *
- * 로컬 근무체계 문서의 규칙을 그대로 구현해, 사용자가 근무표에 노랑 형광펜으로
- * 칠해 둔 "내가 인계하는 사람"과 대조한다. 현재 18/18 일치.
- *
- * 이 스크립트가 규칙의 유일한 검증 수단이므로, packages/domain 에 옮겨 구현할 때
- * 여기 결과가 그대로 나오는지 확인할 것.
+ * 근무체계 문서의 규칙을 그대로 구현한 `packages/domain/src/teams.ts` 를 호출해,
+ * 사용자가 근무표에 노랑 형광펜으로 칠해 둔 "내가 인계하는 사람" 과 대조한다.
+ * 현재 18/18 일치. 이 값이 흔들리면 도메인 팀 로직이 회귀한 것.
  */
 import type { ShiftKind } from '@sp/domain'
+import { teamFor } from '@sp/domain'
 import { load, DAYS } from './sheet'
 
 const { sheet, cells } = load()
@@ -16,24 +15,13 @@ const orange = new Map<number, number>()
 for (const c of cells.flat()) if (c.highlight === 'orange') orange.set(c.row, (orange.get(c.row) ?? 0) + 1)
 const me = [...orange.entries()].sort((a, b) => b[1] - a[1])[0][0]
 
-type Team = 'A' | 'B' | 'C' | 'D' | '액팅'
-// 순위(1-based) -> 팀
-const RANK4: Record<'D' | 'E' | 'N', Team[]> = {
-  D: ['A', 'B', 'C', 'D'],
-  E: ['C', 'D', 'A', 'B'],
-  N: ['B', 'A', 'D', 'C'],
-}
-const RANK3_NIGHT: Team[] = ['A', 'C', 'B']
-
 const workers = (day: number, slot: ShiftKind) =>
   sheet.nurseRows.filter(r => at(r, day).kind === slot)   // 행 순서 = 사번 순서
 
-function teamOf(day: number, slot: 'D' | 'E' | 'N', row: number): Team {
+function teamOf(day: number, slot: 'D' | 'E' | 'N', row: number) {
   const list = workers(day, slot)
   const rank = list.indexOf(row) + 1
-  if (rank === 0) return '액팅'
-  if (slot === 'N' && list.length === 3) return RANK3_NIGHT[rank - 1] ?? '액팅'
-  return RANK4[slot][rank - 1] ?? '액팅'
+  return teamFor(rank, slot, list.length)
 }
 
 const CYCLE: Array<'D' | 'E' | 'N'> = ['D', 'E', 'N']
@@ -59,7 +47,7 @@ for (let day = 1; day <= DAYS; day++) {
   const ok = predicted.length === 1 && predicted[0] === marked[0]
   if (ok) hit++
   console.log(
-    `${String(day).padStart(2)}  ${slot}    ${String(myList.length).padStart(2)}  ${myRank}순위 ${myTeam.padEnd(3)}` +
+    `${String(day).padStart(2)}  ${slot}    ${String(myList.length).padStart(2)}  ${myRank}순위 ${myTeam.padEnd(6)}` +
     `| ${nextSlot} ${String(workers(nd, nextSlot).length).padStart(2)}명 ` +
     `| 예측 [${predicted.join(',')}] | 실제 [${marked.join(',')}] | ${ok ? '✓' : '✗'}`)
 }

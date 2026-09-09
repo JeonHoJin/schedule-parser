@@ -1,12 +1,21 @@
 import { addDays, type IsoDate } from './calendar'
 import { CYCLE, isCycleSlot, type CycleSlot } from './codes'
 import type { RosterIndex } from './roster'
+import { assignTeams, teamFor, type Team } from './teams'
 import type { Nurse, ShiftCell } from './types'
+
+export interface ShiftWorker {
+  nurse: Nurse
+  cell: ShiftCell
+  team: Team
+  /** 근무표 행 순서 기준 이 시간대 근무자 중 몇 번째인지 (1-based) */
+  rank: number
+}
 
 export interface ShiftGroup {
   date: IsoDate
   slot: CycleSlot
-  workers: Array<{ nurse: Nurse; cell: ShiftCell }>
+  workers: ShiftWorker[]
   /**
    * 이 날짜가 지금 근무표의 범위 밖일 때 true.
    * 달의 첫날 Day 의 이전 근무자, 마지막날 Night 의 다음 근무자가 여기 해당한다.
@@ -18,6 +27,8 @@ export interface ShiftGroup {
 export interface Handover {
   date: IsoDate
   slot: CycleSlot
+  /** 그 날 그 시간대 나 자신의 팀 (없으면 null — 오프/기타) */
+  myTeam: Team | null
   /** 나에게 인계하는 사람들 */
   previous: ShiftGroup
   /** 나와 같은 시간대에 함께 일하는 사람들 */
@@ -26,6 +37,11 @@ export interface Handover {
   next: ShiftGroup
 }
 
+/**
+ * 그 날 그 시간대 근무자 전원을 행 순서로 세워 팀·순위를 붙인 뒤,
+ * 필요하면 특정 인원을 제외한 목록을 돌려준다.
+ * 팀 계산은 제외 전 인원 기준이어야 하므로 순서가 중요하다.
+ */
 function group(
   index: RosterIndex,
   date: IsoDate,
@@ -33,11 +49,15 @@ function group(
   excludeNurseId?: string,
 ): ShiftGroup {
   if (!index.covers(date)) return { date, slot, workers: [], outOfRange: true }
-  const workers = index.onDate(date)
-    .filter(c => c.kind === slot && c.nurseId !== excludeNurseId)
+  const all = index.onDate(date)
+    .filter(c => c.kind === slot)
     .map(c => ({ nurse: index.nurse(c.nurseId)!, cell: c }))
     .filter(w => w.nurse)
     .sort((a, b) => a.nurse.order - b.nurse.order)
+  const teams = assignTeams(all, slot)
+  const workers: ShiftWorker[] = all
+    .map((w, i) => ({ nurse: w.nurse, cell: w.cell, team: teams[i], rank: i + 1 }))
+    .filter(w => w.nurse.id !== excludeNurseId)
   return { date, slot, workers, outOfRange: false }
 }
 
@@ -70,11 +90,24 @@ export function handover(
   const prevDate = i === 0 ? addDays(date, -1) : date
   const nextDate = i === 2 ? addDays(date, +1) : date
 
+  // 내 팀은 나를 포함한 전체 근무자 순서로 계산해야 한다.
+  const concurrent = group(index, date, mine.kind, nurseId)
+  const myRank = index.onDate(date)
+    .filter(c => c.kind === mine.kind)
+    .map(c => index.nurse(c.nurseId))
+    .filter((n): n is NonNullable<typeof n> => Boolean(n))
+    .sort((a, b) => a.order - b.order)
+    .findIndex(n => n.id === nurseId) + 1
+  const myTeam = myRank > 0
+    ? teamFor(myRank, mine.kind, concurrent.workers.length + 1)
+    : null
+
   return {
     date,
     slot: mine.kind,
+    myTeam,
     previous: group(index, prevDate, prevSlot),
-    concurrent: group(index, date, mine.kind, nurseId),
+    concurrent,
     next: group(index, nextDate, nextSlot, i === 2 ? undefined : nurseId),
   }
 }
