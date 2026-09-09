@@ -1,0 +1,28 @@
+{
+  "name": "schedule-parser",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test packages/domain/test/*.test.ts apps/mobile/test/*.test.ts",
+    "test:fixtures": "node --import tsx --test packages/*/test/*.test.ts",
+    "typecheck": "tsc -b && tsc --project apps/mobile/tsconfig.json",
+    "grid": "node --import tsx tools/rungrid.ts",
+    "metrics": "node --import tsx tools/metrics.ts",
+    "export": "node --import tsx tools/export.ts",
+    "app": "npm --workspace @sp/mobile run web",
+    "app:build": "npm --workspace @sp/mobile run export:web"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0",
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

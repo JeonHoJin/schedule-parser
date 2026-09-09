@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "근무표",
+    "slug": "schedule-parser",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.hojin.scheduleparser" },
+    "web": { "bundler": "metro", "output": "single" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@sp/recognize",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sp/vision": "0.0.1",
+    "@sp/domain": "0.0.1"
+  }
+}

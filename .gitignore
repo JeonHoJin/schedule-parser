@@ -1,0 +1,21 @@
+node_modules/
+dist/
+debug/
+*.tsbuildinfo
+
+# 일회성 디버깅 스크립트 (빌드·타입체크 대상 아님)
+tools/scratch/
+apps/mobile/dist/
+apps/mobile/.expo/
+
+# Private source material stays on the developer's device.
+fixtures/
+apps/mobile/assets/roster-*.json
+HANDOFF.md
+docs/0*.md
+/*.txt
+Claude outputs/
+.DS_Store
+.env
+.env.*
+!.env.example
