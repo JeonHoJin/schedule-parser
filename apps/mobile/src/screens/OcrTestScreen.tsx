@@ -202,8 +202,23 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
       </p>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '16px 0', flexWrap: 'wrap' }}>
-        <label>년<input type="number" value={year} onChange={e => setYear(+e.target.value)} style={{ width: 80, marginLeft: 4 }} /></label>
-        <label>월<input type="number" min={1} max={12} value={month} onChange={e => setMonth(+e.target.value)} style={{ width: 50, marginLeft: 4 }} /></label>
+        <label>년
+          <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4}
+            value={year ? String(year) : ''}
+            onChange={e => {
+              const digits = e.target.value.replace(/\D/g, '').slice(0, 4)
+              setYear(digits ? +digits : 0)
+            }}
+            onBlur={() => { if (!year || year < 2000) setYear(now) }}
+            style={{ width: 70, marginLeft: 4, padding: 4, fontSize: 16 }} />
+        </label>
+        <label>월
+          <select value={month} onChange={e => setMonth(+e.target.value)} style={{ marginLeft: 4, padding: 4, fontSize: 16 }}>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+              <option key={m} value={m}>{m}월</option>
+            ))}
+          </select>
+        </label>
         <label>회전
           <select value={rotation} disabled={disabled} onChange={e => {
             const r = +e.target.value as Rotation; setRotation(r)
