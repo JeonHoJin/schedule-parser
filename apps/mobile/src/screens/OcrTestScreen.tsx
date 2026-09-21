@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { daysInMonth, type Roster } from '@sp/domain'
-import { prepareSheet, type PreparedSheet } from '@sp/recognize'
 import type { Rgba } from '@sp/vision'
-import { fileToRgba, rotateRgba } from '../experimental/browser-image'
+import { fileToRgba } from '../experimental/browser-image'
 import { readExifDate } from '../experimental/exif'
 import { fullParse } from '../experimental/full-parse'
 import { nameStrips, workToCanvas, type NameStrip } from '../experimental/name-strip'
@@ -12,6 +11,7 @@ import type { LocalRoster } from '../data'
 
 type Phase = 'idle' | 'decoding' | 'detecting' | 'parsing' | 'ocring' | 'saving' | 'done' | 'error'
 type Rotation = 0 | 90 | 180 | 270
+type RotationChoice = Rotation | 'auto'
 
 interface Timing { label: string; ms: number }
 interface RowResult { row: number; text: string; confidence: number; canvas: HTMLCanvasElement }
@@ -28,12 +28,14 @@ interface ParseSummary {
   counts: Record<string, number>
   empnoOk: number
   empnoMissing: number
+  rotationUsed: Rotation
+  score: number
 }
 
 const now = 2026
 const nowMonth = 9
 
-export function OcrTestScreen({ onBack }: { onBack: () => void }) {
+export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
@@ -42,13 +44,13 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
   const [diag, setDiag] = useState<Diagnostic | null>(null)
   const [summary, setSummary] = useState<ParseSummary | null>(null)
   const [runOcr, setRunOcr] = useState(false)
-  const [rotation, setRotation] = useState<Rotation>(0)
+  const [rotation, setRotation] = useState<RotationChoice>('auto')
   const [year, setYear] = useState(now)
   const [month, setMonth] = useState(nowMonth)
   const [exifNote, setExifNote] = useState('')
   const [originalImg, setOriginalImg] = useState<Rgba | null>(null)
 
-  async function run(file: File | null, degCw: Rotation, alsoOcr: boolean) {
+  async function run(file: File | null, choice: RotationChoice, alsoOcr: boolean) {
     setPhase('decoding')
     setProgress('이미지 디코딩 중...')
     setError('')
@@ -66,21 +68,19 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
       const raw = file ? await fileToRgba(file) : originalImg
       if (!raw) throw new Error('사진이 선택되지 않았습니다')
       if (file) setOriginalImg(raw)
-      const img = rotateRgba(raw, degCw)
       const t1 = performance.now()
 
-      setPhase('detecting')
-      setProgress('격자 검출 중...')
+      setPhase('parsing')
+      setProgress(choice === 'auto' ? '자동 회전 감지 + 근무표 파싱 중...' : '근무표 파싱 중...')
       const days = daysInMonth(year, month)
-      let sheet: PreparedSheet
-      try {
-        sheet = prepareSheet(img, days)
-      } catch (e) {
-        throw new Error(`격자 검출 실패: ${e instanceof Error ? e.message : e}\n\n회전을 바꿔 다시 시도해 보세요.`)
-      }
+      const parsed = fullParse(raw, {
+        id: `roster-${year}-${String(month).padStart(2, '0')}`, year, month, days,
+        rotation: choice === 'auto' ? undefined : choice,
+      })
       const t2 = performance.now()
 
-      // 진단 오버레이
+      // 진단 오버레이 — fullParse 가 뽑아 준 sheet 재활용
+      const sheet = parsed.sheet
       const strips: NameStrip[] = nameStrips(sheet)
       const overlay = workToCanvas(sheet, 800)
       const octx = overlay.getContext('2d')!
@@ -101,12 +101,6 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
         suspectRotation: sheet.detect.lattice.cols < sheet.detect.lattice.rows,
       })
 
-      setPhase('parsing')
-      setProgress('근무표 파싱 중...')
-      const t3 = performance.now()
-      const parsed = fullParse(img, { id: `roster-${year}-${String(month).padStart(2, '0')}`, year, month, days })
-      const t4 = performance.now()
-
       const counts: Record<string, number> = {}
       for (const c of parsed.roster.cells) counts[c.kind] = (counts[c.kind] ?? 0) + 1
       setSummary({
@@ -114,25 +108,26 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
         counts,
         empnoOk: parsed.empnos.filter(e => e.value).length,
         empnoMissing: parsed.empnos.filter(e => !e.value).length,
+        rotationUsed: parsed.rotationUsed,
+        score: parsed.score,
       })
 
       const baseTimings: Timing[] = [
         { label: '이미지 디코딩', ms: t1 - t0 },
-        { label: '격자 검출', ms: t2 - t1 },
-        { label: '근무표 파싱', ms: t4 - t3 },
+        { label: `파싱 (회전 ${parsed.rotationUsed}°)`, ms: t2 - t1 },
       ]
 
       if (!alsoOcr) {
-        setTimings([...baseTimings, { label: '총합', ms: t4 - t0 }])
+        setTimings([...baseTimings, { label: '총합', ms: t2 - t0 }])
         setPhase('done')
         return
       }
 
       setPhase('ocring')
       setProgress('Tesseract 로드 중... (첫 실행 시 20MB 다운로드)')
-      const t5 = performance.now()
+      const t3 = performance.now()
       const worker = await createOcrWorker('kor')
-      const t6 = performance.now()
+      const t4 = performance.now()
 
       const out: RowResult[] = []
       try {
@@ -143,13 +138,13 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
           out.push({ row: strip.row, text: r.text.trim(), confidence: r.confidence, canvas: strip.canvas })
         }
       } finally { await worker.terminate() }
-      const t7 = performance.now()
+      const t5 = performance.now()
 
       setRows(out)
       setTimings([...baseTimings,
-        { label: 'Tesseract 로드', ms: t6 - t5 },
-        { label: `이름 OCR (${strips.length}행)`, ms: t7 - t6 },
-        { label: '총합', ms: t7 - t0 },
+        { label: 'Tesseract 로드', ms: t4 - t3 },
+        { label: `이름 OCR (${strips.length}행)`, ms: t5 - t4 },
+        { label: '총합', ms: t5 - t0 },
       ])
       setProgress('')
       setPhase('done')
@@ -182,7 +177,7 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
         review: { empnos: [], cells: [] },
       }
       await saveRoster(local)
-      onBack()
+      onClose(summary.roster.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장 실패')
       setPhase('error')
@@ -194,7 +189,7 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
   return (
     <div style={{ height: '100vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
      <div style={{ padding: 20, paddingBottom: 60, maxWidth: 900, margin: '0 auto', fontFamily: 'system-ui' }}>
-      <button onClick={onBack} style={{ marginBottom: 12 }}>‹ 뒤로</button>
+      <button onClick={() => onClose()} style={{ marginBottom: 12 }}>‹ 뒤로</button>
       <h2 style={{ marginTop: 0 }}>근무표 사진 추가</h2>
       <p style={{ color: '#666', fontSize: 14 }}>
         사진을 선택하면 격자를 검출하고 D/E/N/// 코드와 사번을 자동 인식합니다.
@@ -221,9 +216,12 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
         </label>
         <label>회전
           <select value={rotation} disabled={disabled} onChange={e => {
-            const r = +e.target.value as Rotation; setRotation(r)
+            const v = e.target.value
+            const r: RotationChoice = v === 'auto' ? 'auto' : (+v as Rotation)
+            setRotation(r)
             if (originalImg) void run(null, r, runOcr)
-          }} style={{ marginLeft: 4 }}>
+          }} style={{ marginLeft: 4, padding: 4, fontSize: 16 }}>
+            <option value="auto">자동</option>
             <option value={0}>0°</option>
             <option value={90}>90° CW</option>
             <option value={180}>180°</option>
@@ -253,6 +251,7 @@ export function OcrTestScreen({ onBack }: { onBack: () => void }) {
             근무표 ID <code>{summary.roster.id}</code> · 간호사 {summary.roster.nurses.length}명 · 셀 {summary.roster.cells.length}칸
             <br />코드 분포: {Object.entries(summary.counts).map(([k, v]) => `${k}:${v}`).join(' · ')}
             <br />사번 인식 성공 {summary.empnoOk} · 실패 {summary.empnoMissing}
+            <br /><span style={{ color: '#555' }}>회전 {summary.rotationUsed}° 적용됨 (자동 감지 점수 {summary.score})</span>
           </p>
           <button
             disabled={disabled}

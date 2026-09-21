@@ -28,7 +28,19 @@ export default function App() {
       .catch(e => setError(e.message)).finally(() => setBusy(false))
   }, [])
 
-  if (ocrTest) return <OcrTestScreen onBack={() => setOcrTest(false)} />
+  if (ocrTest) return (
+    <OcrTestScreen onClose={async savedId => {
+      if (savedId) {
+        const next = await refresh().catch(() => null)
+        if (next?.some(i => i.roster.id === savedId)) {
+          setSelected(savedId)
+          setDate(null)
+          setNotice('이 기기에 저장했습니다.')
+        }
+      }
+      setOcrTest(false)
+    }} />
+  )
 
   async function run(action: () => Promise<void>) {
     setBusy(true)
