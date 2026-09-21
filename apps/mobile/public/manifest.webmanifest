@@ -1,0 +1,19 @@
+{
+  "name": "근무표",
+  "short_name": "근무표",
+  "description": "병동 근무표 사진 파싱 및 개인 달력",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#F7F7F8",
+  "theme_color": "#2C6BED",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

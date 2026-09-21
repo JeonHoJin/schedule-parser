@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#2C6BED"/>
+  <g fill="#FFFFFF">
+    <rect x="96" y="128" width="320" height="288" rx="24" fill="none" stroke="#FFFFFF" stroke-width="16"/>
+    <rect x="96" y="128" width="320" height="56" fill="#FFFFFF"/>
+    <g font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle" font-size="72" fill="#2C6BED">
+      <text x="256" y="176">2026</text>
+    </g>
+    <g font-family="system-ui, -apple-system, sans-serif" font-weight="700" text-anchor="middle" font-size="72" fill="#FFFFFF">
+      <text x="176" y="280">D</text>
+      <text x="256" y="280">E</text>
+      <text x="336" y="280">N</text>
+      <text x="176" y="376">//</text>
+      <text x="256" y="376">D</text>
+      <text x="336" y="376">E</text>
+    </g>
+  </g>
+</svg>
