@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { CalendarScreen } from './src/screens/CalendarScreen'
 import { ShiftDetailScreen } from './src/screens/ShiftDetailScreen'
+import { OcrTestScreen } from './src/screens/OcrTestScreen'
 import { displayName, RosterContext, type LocalRoster } from './src/data'
 import { listRosters, parseBackup, removeRoster, saveRoster } from './src/local-storage'
 import './src/web.css'
@@ -13,6 +14,7 @@ export default function App() {
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [ocrTest, setOcrTest] = useState(false)
   const current = items.find(i => i.roster.id === selected)
 
   async function refresh() {
@@ -25,6 +27,8 @@ export default function App() {
     refresh().then(next => setSelected(next[0]?.roster.id ?? ''))
       .catch(e => setError(e.message)).finally(() => setBusy(false))
   }, [])
+
+  if (ocrTest) return <OcrTestScreen onBack={() => setOcrTest(false)} />
 
   async function run(action: () => Promise<void>) {
     setBusy(true)
@@ -74,6 +78,7 @@ export default function App() {
               if (file) void importFile(file)
             }} />
         </label>
+        <button type="button" onClick={() => setOcrTest(true)} style={{ marginLeft: 8 }}>이름 OCR 실측</button>
       </header>
       <section className="local-controls" aria-label="저장된 근무표">
         {items.length > 0 && <label>근무표
