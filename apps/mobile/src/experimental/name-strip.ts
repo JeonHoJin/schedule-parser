@@ -1,27 +1,30 @@
 /**
- * 검출된 격자에서 각 간호사 행의 왼쪽(이름·사번이 인쇄된 영역)을
- * 잘라 <canvas> 로 만들어 OCR 에 넘긴다.
+ * 검출된 격자에서 각 간호사 행의 이름 칸과 사번 칸을 각각 잘라 <canvas> 로 만든다.
  *
- * 사번이 있는 근무표에서는 이 영역에 이름+사번이 함께 들어 있고,
- * 사번이 없는 과거 근무표에서는 이름만 들어 있다. Tesseract 는
- * 어느 쪽이든 인쇄된 문자를 그대로 뽑아 준다.
+ * 이전 버전은 [이미지 왼쪽 끝 ~ day1] 전체를 한 조각으로 잘라 Tesseract 에 넘겼는데,
+ * 그러면 이름과 사번이 뒤섞여 인식률이 크게 떨어졌다. 사번 열 위치는
+ * `packages/recognize/src/digits.ts` 의 `empnoBox` 와 같은 규칙으로 계산해서
+ * 그 왼쪽만 이름 칸으로 잡는다.
  */
 import type { PreparedSheet } from '@sp/recognize'
-import type { Rgba } from '@sp/vision'
+import { empnoBox } from '@sp/recognize'
+import type { Box, Rgba } from '@sp/vision'
 
+export interface RowStrips {
+  row: number
+  nameCanvas: HTMLCanvasElement
+  empnoCanvas: HTMLCanvasElement
+  nameBox: Box
+  empnoBox: Box
+}
+
+/** 이전 이름 OCR API 유지 — 이름 크롭만 반환. */
 export interface NameStrip {
   row: number
   canvas: HTMLCanvasElement
-  /** 디버그용: 원본 work 이미지 좌표계에서의 크롭 박스 */
   box: { x: number; y: number; w: number; h: number }
 }
 
-export interface StripOptions {
-  /** 크롭 여백 (px) */
-  pad?: number
-}
-
-/** work 이미지에서 [x, y, w, h] 를 잘라 새 canvas 로 돌려준다 */
 function cropToCanvas(src: Rgba, x: number, y: number, w: number, h: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = w
@@ -38,31 +41,58 @@ function cropToCanvas(src: Rgba, x: number, y: number, w: number, h: number): HT
       if (sx < 0 || sx >= src.width) continue
       const so = (sy * src.width + sx) * 4
       const di = (yy * w + xx) * 4
-      dst[di] = s[so]
-      dst[di + 1] = s[so + 1]
-      dst[di + 2] = s[so + 2]
-      dst[di + 3] = 255
+      dst[di] = s[so]; dst[di + 1] = s[so + 1]; dst[di + 2] = s[so + 2]; dst[di + 3] = 255
     }
   }
   ctx.putImageData(out, 0, 0)
   return canvas
 }
 
-/**
- * 각 행에서 x=0 부터 day1 셀 바로 앞까지를 크롭한다.
- * matrix[row][0] 이 시각적 최좌측 열이 아닐 수 있으므로 무조건 이미지 왼쪽 끝(0)부터.
- */
-export function nameStrips(sheet: PreparedSheet, opts: StripOptions = {}): NameStrip[] {
-  const pad = opts.pad ?? 2
+/** prepareEmpnoColumn 과 동일 규칙으로 사번 열 픽셀 너비를 계산 */
+function empnoWidth(sheet: PreparedSheet): number {
+  const matrix = sheet.detect.lattice.matrix
+  const detected = sheet.nurseRows.map(r => matrix[r][0]).filter(b => b.detected).map(b => b.w)
+  if (detected.length) {
+    const sorted = [...detected].sort((a, b) => a - b)
+    return sorted[sorted.length >> 1]
+  }
+  return matrix[sheet.nurseRows[0]][0].w
+}
+
+export function rowStrips(sheet: PreparedSheet): RowStrips[] {
   const work = sheet.detect.work
+  const matrix = sheet.detect.lattice.matrix
+  const width = empnoWidth(sheet)
+  const gap = 6
+
   return sheet.nurseRows.map(row => {
     const day1 = sheet.boxOf(row, 1)
-    const x0 = 0
-    const y0 = Math.max(0, Math.round(day1.y - pad))
-    const w = Math.max(1, Math.min(work.width - x0, Math.round(day1.x - pad)))
-    const h = Math.max(1, Math.min(work.height - y0, Math.round(day1.h + pad * 2)))
-    return { row, canvas: cropToCanvas(work, x0, y0, w, h), box: { x: x0, y: y0, w, h } }
+    const latticeCell = matrix[row][0]
+    const empno = empnoBox(day1, latticeCell, width, gap)
+
+    const nameX = 0
+    const nameY = Math.max(0, Math.round(empno.y - 2))
+    const nameW = Math.max(1, Math.round(empno.x - nameX - 2))
+    const nameH = Math.max(1, Math.min(work.height - nameY, Math.round(empno.h + 4)))
+
+    const empX = Math.max(0, Math.round(empno.x))
+    const empY = Math.max(0, Math.round(empno.y - 2))
+    const empW = Math.max(1, Math.min(work.width - empX, Math.round(empno.w)))
+    const empH = Math.max(1, Math.min(work.height - empY, Math.round(empno.h + 4)))
+
+    return {
+      row,
+      nameCanvas: cropToCanvas(work, nameX, nameY, nameW, nameH),
+      empnoCanvas: cropToCanvas(work, empX, empY, empW, empH),
+      nameBox: { x: nameX, y: nameY, w: nameW, h: nameH },
+      empnoBox: { x: empX, y: empY, w: empW, h: empH },
+    }
   })
+}
+
+/** 이전 API — 이름 크롭만 반환 (기존 코드 호환) */
+export function nameStrips(sheet: PreparedSheet): NameStrip[] {
+  return rowStrips(sheet).map(r => ({ row: r.row, canvas: r.nameCanvas, box: r.nameBox }))
 }
 
 /** 전체 work 이미지를 canvas 로 (디버그 오버레이용) */
@@ -75,8 +105,6 @@ export function workToCanvas(sheet: PreparedSheet, maxWidth = 800): HTMLCanvasEl
   c.width = w
   c.height = h
   const ctx = c.getContext('2d')!
-  // 축소가 필요하면 원본을 그린 뒤 scale 로 다시 그리기가 정확하지만
-  // 여기서는 시각 확인용이라 nearest-neighbor 로 충분
   const full = cropToCanvas(work, 0, 0, work.width, work.height)
   ctx.imageSmoothingEnabled = true
   ctx.drawImage(full, 0, 0, w, h)

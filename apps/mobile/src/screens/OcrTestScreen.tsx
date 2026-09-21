@@ -4,17 +4,16 @@ import type { Rgba } from '@sp/vision'
 import { fileToRgba } from '../experimental/browser-image'
 import { readExifDate } from '../experimental/exif'
 import { fullParse } from '../experimental/full-parse'
-import { nameStrips, workToCanvas, type NameStrip } from '../experimental/name-strip'
+import { rowStrips, workToCanvas, type RowStrips } from '../experimental/name-strip'
 import { createOcrWorker } from '../experimental/tesseract'
 import { listRosters, saveRoster } from '../local-storage'
 import type { LocalRoster } from '../data'
 
-type Phase = 'idle' | 'decoding' | 'detecting' | 'parsing' | 'ocring' | 'saving' | 'done' | 'error'
+type Phase = 'idle' | 'decoding' | 'parsing' | 'ocring' | 'saving' | 'done' | 'error'
 type Rotation = 0 | 90 | 180 | 270
 type RotationChoice = Rotation | 'auto'
 
 interface Timing { label: string; ms: number }
-interface RowResult { row: number; text: string; confidence: number; canvas: HTMLCanvasElement }
 interface Diagnostic {
   workSize: { w: number; h: number }
   rows: number
@@ -32,6 +31,21 @@ interface ParseSummary {
   score: number
 }
 
+/** 편집 가능한 간호사 한 명의 상태 */
+interface NurseEdit {
+  row: number
+  /** roster.nurses 의 원래 id (수정하지 않음) */
+  originalId: string
+  empno: string
+  empnoConfidence: number
+  empnoNeedsReview: boolean
+  name: string
+  ocrNameRaw: string
+  ocrConfidence: number
+  nameCanvas: HTMLCanvasElement
+  empnoCanvas: HTMLCanvasElement
+}
+
 const now = 2026
 const nowMonth = 9
 
@@ -40,10 +54,10 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
   const [timings, setTimings] = useState<Timing[]>([])
-  const [rows, setRows] = useState<RowResult[]>([])
   const [diag, setDiag] = useState<Diagnostic | null>(null)
   const [summary, setSummary] = useState<ParseSummary | null>(null)
-  const [runOcr, setRunOcr] = useState(false)
+  const [nurses, setNurses] = useState<NurseEdit[]>([])
+  const [runOcr, setRunOcr] = useState(true)
   const [rotation, setRotation] = useState<RotationChoice>('auto')
   const [year, setYear] = useState(now)
   const [month, setMonth] = useState(nowMonth)
@@ -54,7 +68,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
     setPhase('decoding')
     setProgress('이미지 디코딩 중...')
     setError('')
-    setTimings([]); setRows([]); setDiag(null); setSummary(null)
+    setTimings([]); setDiag(null); setSummary(null); setNurses([])
     try {
       if (file) {
         const d = await readExifDate(file).catch(() => null)
@@ -79,20 +93,18 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
       })
       const t2 = performance.now()
 
-      // 진단 오버레이 — fullParse 가 뽑아 준 sheet 재활용
+      // 진단 오버레이
       const sheet = parsed.sheet
-      const strips: NameStrip[] = nameStrips(sheet)
+      const strips: RowStrips[] = rowStrips(sheet)
       const overlay = workToCanvas(sheet, 800)
       const octx = overlay.getContext('2d')!
       const s = overlay.width / sheet.detect.work.width
-      octx.strokeStyle = 'rgba(255, 220, 0, 0.9)'
       octx.lineWidth = 2
-      for (const strip of strips) octx.strokeRect(strip.box.x * s, strip.box.y * s, strip.box.w * s, strip.box.h * s)
-      const firstNurse = sheet.nurseRows[0]
-      if (firstNurse !== undefined) {
-        const d1 = sheet.boxOf(firstNurse, 1)
-        octx.strokeStyle = 'rgba(255, 0, 0, 0.9)'
-        octx.beginPath(); octx.moveTo(d1.x * s, 0); octx.lineTo(d1.x * s, overlay.height); octx.stroke()
+      for (const strip of strips) {
+        octx.strokeStyle = 'rgba(255, 220, 0, 0.9)'
+        octx.strokeRect(strip.nameBox.x * s, strip.nameBox.y * s, strip.nameBox.w * s, strip.nameBox.h * s)
+        octx.strokeStyle = 'rgba(80, 200, 255, 0.9)'
+        octx.strokeRect(strip.empnoBox.x * s, strip.empnoBox.y * s, strip.empnoBox.w * s, strip.empnoBox.h * s)
       }
       setDiag({
         workSize: { w: sheet.detect.work.width, h: sheet.detect.work.height },
@@ -112,6 +124,25 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
         score: parsed.score,
       })
 
+      // 초기 검수 리스트: OCR 없이도 사번은 채워둔다
+      const initial: NurseEdit[] = strips.map((strip, i) => {
+        const e = parsed.empnos[i]
+        const n = parsed.roster.nurses[i]
+        return {
+          row: strip.row,
+          originalId: n.id,
+          empno: e?.value ?? '',
+          empnoConfidence: e?.minScore ?? 0,
+          empnoNeedsReview: e?.needsReview ?? true,
+          name: '',
+          ocrNameRaw: '',
+          ocrConfidence: 0,
+          nameCanvas: strip.nameCanvas,
+          empnoCanvas: strip.empnoCanvas,
+        }
+      })
+      setNurses(initial)
+
       const baseTimings: Timing[] = [
         { label: '이미지 디코딩', ms: t1 - t0 },
         { label: `파싱 (회전 ${parsed.rotationUsed}°)`, ms: t2 - t1 },
@@ -129,18 +160,24 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
       const worker = await createOcrWorker('kor')
       const t4 = performance.now()
 
-      const out: RowResult[] = []
+      const updates = [...initial]
       try {
         for (let i = 0; i < strips.length; i++) {
           setProgress(`이름 OCR ${i + 1}/${strips.length}`)
           const strip = strips[i]
-          const r = await worker.recognize(strip.canvas)
-          out.push({ row: strip.row, text: r.text.trim(), confidence: r.confidence, canvas: strip.canvas })
+          const r = await worker.recognize(strip.nameCanvas)
+          const cleaned = r.text.replace(/[|｜ㅣ\s|\/\\_\-.]+/g, '').replace(/\d+/g, '').trim()
+          updates[i] = {
+            ...updates[i],
+            name: cleaned,
+            ocrNameRaw: r.text.trim(),
+            ocrConfidence: r.confidence,
+          }
+          setNurses([...updates])
         }
       } finally { await worker.terminate() }
       const t5 = performance.now()
 
-      setRows(out)
       setTimings([...baseTimings,
         { label: 'Tesseract 로드', ms: t4 - t3 },
         { label: `이름 OCR (${strips.length}행)`, ms: t5 - t4 },
@@ -164,15 +201,32 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
         setPhase('done'); setProgress('')
         return
       }
-      // OCR 로 읽은 이름이 있으면 nurses.name 에 반영
-      const nameByRow = new Map(rows.map(r => [r.row, r.text.replace(/\s+/g, '')]))
-      const nurses = summary.roster.nurses.map((n, i) => {
-        const row = i + 2 // 격자 행 (헤더 2행 제외)
-        const guess = nameByRow.get(row)
-        return { ...n, name: guess || n.name || '' }
+      // 편집된 사번·이름을 nurses 배열에 반영
+      const editByOriginalId = new Map(nurses.map(n => [n.originalId, n]))
+      const editByRowIndex = nurses.map((n, i) => ({ i, n }))
+      const patchedNurses = summary.roster.nurses.map((n, i) => {
+        const edit = editByOriginalId.get(n.id) ?? editByRowIndex[i]?.n
+        if (!edit) return { ...n, name: n.name ?? '' }
+        const empno = edit.empno.replace(/\D/g, '').trim()
+        return {
+          ...n,
+          empNo: empno,
+          id: empno || n.id,
+          name: (edit.name || '').trim(),
+        }
       })
+      // 사번을 편집한 경우 cells 의 nurseId 도 업데이트
+      const idRemap = new Map<string, string>()
+      summary.roster.nurses.forEach((old, i) => {
+        const newId = patchedNurses[i].id
+        if (old.id !== newId) idRemap.set(old.id, newId)
+      })
+      const patchedCells = idRemap.size
+        ? summary.roster.cells.map(c => idRemap.has(c.nurseId) ? { ...c, nurseId: idRemap.get(c.nurseId)! } : c)
+        : summary.roster.cells
+
       const local: LocalRoster = {
-        roster: { ...summary.roster, nurses },
+        roster: { ...summary.roster, nurses: patchedNurses, cells: patchedCells },
         settings: { reviewThreshold: 0.8 },
         review: { empnos: [], cells: [] },
       }
@@ -184,16 +238,20 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
     } finally { setProgress('') }
   }
 
-  const disabled = phase === 'decoding' || phase === 'detecting' || phase === 'parsing' || phase === 'ocring' || phase === 'saving'
+  function updateNurse(row: number, patch: Partial<Pick<NurseEdit, 'name' | 'empno'>>) {
+    setNurses(prev => prev.map(n => n.row === row ? { ...n, ...patch } : n))
+  }
+
+  const disabled = phase === 'decoding' || phase === 'parsing' || phase === 'ocring' || phase === 'saving'
 
   return (
     <div style={{ height: '100vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-     <div style={{ padding: 20, paddingBottom: 60, maxWidth: 900, margin: '0 auto', fontFamily: 'system-ui' }}>
+     <div style={{ padding: 20, paddingBottom: 60, maxWidth: 960, margin: '0 auto', fontFamily: 'system-ui' }}>
       <button onClick={() => onClose()} style={{ marginBottom: 12 }}>‹ 뒤로</button>
       <h2 style={{ marginTop: 0 }}>근무표 사진 추가</h2>
       <p style={{ color: '#666', fontSize: 14 }}>
-        사진을 선택하면 격자를 검출하고 D/E/N/// 코드와 사번을 자동 인식합니다.
-        이름 OCR 은 사번이 없는 과거 근무표용 (Tesseract.js 20MB 첫 다운로드).
+        사진을 선택하면 격자를 검출하고 D/E/N/// 코드 · 사번을 자동 인식합니다.
+        이름 OCR 은 옵션 (Tesseract.js 20MB 첫 다운로드). 저장 전에 아래 표에서 사번·이름을 직접 수정할 수 있어요.
       </p>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '16px 0', flexWrap: 'wrap' }}>
@@ -261,12 +319,63 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
         </div>
       )}
 
+      {nurses.length > 0 && (
+        <div>
+          <h3>간호사 목록 검수 ({nurses.length}명)</h3>
+          <p style={{ fontSize: 13, color: '#666', marginTop: 0 }}>
+            사번·이름이 틀린 곳을 직접 수정해 주세요. 사번을 바꾸면 근무 기록의 소속도 함께 이동합니다.
+          </p>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#f5f5f7' }}>
+                <th style={cellStyle}>행</th>
+                <th style={cellStyle}>사번 이미지</th>
+                <th style={cellStyle}>사번</th>
+                <th style={cellStyle}>이름 이미지</th>
+                <th style={cellStyle}>이름</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nurses.map(n => (
+                <tr key={n.row} style={n.empnoNeedsReview ? { background: '#FFF7EC' } : undefined}>
+                  <td style={cellStyle}>{n.row}</td>
+                  <td style={cellStyle}><CanvasCell canvas={n.empnoCanvas} maxWidth={140} /></td>
+                  <td style={cellStyle}>
+                    <input
+                      type="text" inputMode="numeric" pattern="[0-9]*"
+                      value={n.empno}
+                      onChange={e => updateNurse(n.row, { empno: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                      style={{ width: 100, padding: 4, fontSize: 16, fontFamily: 'monospace' }}
+                    />
+                    <div style={{ fontSize: 10, color: '#888' }}>
+                      신뢰도 {n.empnoConfidence.toFixed(2)}{n.empnoNeedsReview ? ' · 검수' : ''}
+                    </div>
+                  </td>
+                  <td style={cellStyle}><CanvasCell canvas={n.nameCanvas} maxWidth={180} /></td>
+                  <td style={cellStyle}>
+                    <input
+                      type="text"
+                      value={n.name}
+                      onChange={e => updateNurse(n.row, { name: e.target.value.slice(0, 20) })}
+                      style={{ width: 120, padding: 4, fontSize: 16 }}
+                    />
+                    {n.ocrNameRaw && (
+                      <div style={{ fontSize: 10, color: '#888' }}>OCR "{n.ocrNameRaw}" · {n.ocrConfidence.toFixed(0)}</div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {diag && (
         <div style={{ background: '#F7F7F8', padding: 12, borderRadius: 8, margin: '16px 0' }}>
           <h3 style={{ marginTop: 0 }}>격자 진단</h3>
           <p style={{ fontSize: 13, color: '#555' }}>
             작업 이미지 {diag.workSize.w}×{diag.workSize.h} · 격자 {diag.rows}행 × {diag.cols}열 · 간호사 {diag.nurseRows}명
-            <br />노랑 = 이름 칸으로 크롭한 영역, 빨강 세로선 = day1 열 시작
+            <br />노랑 = 이름 칸, 파랑 = 사번 칸으로 크롭한 영역
           </p>
           {diag.suspectRotation && (
             <p style={{ color: '#B4560A', fontWeight: 600 }}>
@@ -286,32 +395,6 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>{t.ms.toFixed(0)} ms</span>
             </div>
           ))}
-        </div>
-      )}
-
-      {rows.length > 0 && (
-        <div>
-          <h3>이름 OCR 결과 ({rows.length}행)</h3>
-          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead>
-              <tr style={{ background: '#f5f5f7' }}>
-                <th style={cellStyle}>행</th>
-                <th style={cellStyle}>이미지</th>
-                <th style={cellStyle}>인식</th>
-                <th style={cellStyle}>신뢰도</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.row}>
-                  <td style={cellStyle}>{r.row}</td>
-                  <td style={cellStyle}><CanvasCell canvas={r.canvas} maxWidth={240} /></td>
-                  <td style={{ ...cellStyle, fontFamily: 'monospace', whiteSpace: 'pre' }}>{r.text || '(빈값)'}</td>
-                  <td style={cellStyle}>{r.confidence.toFixed(0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
      </div>

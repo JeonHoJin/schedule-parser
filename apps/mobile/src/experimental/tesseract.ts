@@ -24,6 +24,7 @@ interface TesseractApi {
     recognize: (input: HTMLCanvasElement | ImageBitmap | Blob | string) => Promise<{
       data: { text: string; confidence: number }
     }>
+    setParameters: (params: Record<string, string>) => Promise<unknown>
     terminate: () => Promise<void>
   }>
 }
@@ -65,6 +66,12 @@ export async function createOcrWorker(lang = 'kor'): Promise<OcrWorker> {
     workerPath: `${CDN}/dist/worker.min.js`,
     corePath: CORE,
     langPath: LANG,
+  })
+  // 이름 셀은 짧은 한 줄이라 single-line 세그멘테이션이 더 안정적.
+  // 완성형 한글 + 공백만 허용해 숫자·구분자를 제거한다.
+  await worker.setParameters({
+    tessedit_pageseg_mode: '7',
+    preserve_interword_spaces: '0',
   })
   return {
     recognize: async (canvas) => {
