@@ -9,10 +9,23 @@
  * GitHub Pages 서브패스 배포와 로컬 dev 서버 모두에서 자동으로 맞는 경로가 된다.
  */
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
+
 export function registerServiceWorker() {
   if (typeof window === 'undefined') return
   ensureManifestLink()
   if (!('serviceWorker' in navigator)) return
+
+  // 로컬 dev 에서는 SW 를 등록하지 않고, 예전에 등록된 것도 지운다.
+  // SW 가 살아 있으면 Metro 가 새로 빌드해도 오래된 번들이 계속 로드된다.
+  if (LOCAL_HOSTS.has(location.hostname)) {
+    navigator.serviceWorker.getRegistrations().then(async regs => {
+      for (const r of regs) await r.unregister()
+      const cs = 'caches' in window ? await caches.keys() : []
+      await Promise.all(cs.map(k => caches.delete(k)))
+    }).catch(() => {})
+    return
+  }
 
   const swUrl = new URL('sw.js', location.href).toString()
   window.addEventListener('load', () => {
