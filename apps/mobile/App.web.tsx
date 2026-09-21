@@ -78,7 +78,7 @@ export default function App() {
               if (file) void importFile(file)
             }} />
         </label>
-        <button type="button" onClick={() => setOcrTest(true)} style={{ marginLeft: 8 }}>이름 OCR 실측</button>
+        <button type="button" onClick={() => setOcrTest(true)} style={{ marginLeft: 8 }}>근무표 사진 추가</button>
       </header>
       <section className="local-controls" aria-label="저장된 근무표">
         {items.length > 0 && <label>근무표
