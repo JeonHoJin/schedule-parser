@@ -15,7 +15,7 @@ import { rotateRgba } from './browser-image'
 
 interface SerialTemplate { raw: string; vector: number[] }
 interface TemplateFile {
-  version: number; source: string; featureDim: number; digitDim: number
+  version: number; featureDim: number; digitDim: number
   cells: SerialTemplate[]; digits: SerialTemplate[]
 }
 

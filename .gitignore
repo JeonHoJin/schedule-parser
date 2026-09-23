@@ -19,3 +19,17 @@ Claude outputs/
 .env
 .env.*
 !.env.example
+
+# Secrets and credentials never enter the repository.
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+secrets/
+*.local.toml
+*.local.json
+
+# Internal design, infrastructure and security notes stay local.
+docs/private/
+.claude/
