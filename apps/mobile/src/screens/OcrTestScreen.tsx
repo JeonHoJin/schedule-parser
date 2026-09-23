@@ -5,7 +5,7 @@ import { fileToRgba } from '../experimental/browser-image'
 import { readExifDate } from '../experimental/exif'
 import { fullParse } from '../experimental/full-parse'
 import { rowStrips, workToCanvas, type RowStrips } from '../experimental/name-strip'
-import { createOcrWorker } from '../experimental/tesseract'
+import { looksLikeEmpno, looksLikeName, readRows } from '../server/ocr'
 import { listRosters, saveRoster } from '../local-storage'
 import type { LocalRoster } from '../data'
 
@@ -39,7 +39,9 @@ interface NurseEdit {
   empno: string
   empnoConfidence: number
   empnoNeedsReview: boolean
+  empnoSource: 'server' | 'device'
   name: string
+  /** 서버가 읽은 원문 (형식에 안 맞아 이름으로 채우지 않은 경우 참고용) */
   ocrNameRaw: string
   ocrConfidence: number
   nameCanvas: HTMLCanvasElement
@@ -57,18 +59,18 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
   const [diag, setDiag] = useState<Diagnostic | null>(null)
   const [summary, setSummary] = useState<ParseSummary | null>(null)
   const [nurses, setNurses] = useState<NurseEdit[]>([])
-  const [runOcr, setRunOcr] = useState(true)
+  const [ocrNote, setOcrNote] = useState('')
   const [rotation, setRotation] = useState<RotationChoice>('auto')
   const [year, setYear] = useState(now)
   const [month, setMonth] = useState(nowMonth)
   const [exifNote, setExifNote] = useState('')
   const [originalImg, setOriginalImg] = useState<Rgba | null>(null)
 
-  async function run(file: File | null, choice: RotationChoice, alsoOcr: boolean) {
+  async function run(file: File | null, choice: RotationChoice) {
     setPhase('decoding')
     setProgress('이미지 디코딩 중...')
     setError('')
-    setTimings([]); setDiag(null); setSummary(null); setNurses([])
+    setTimings([]); setDiag(null); setSummary(null); setNurses([]); setOcrNote('')
     try {
       if (file) {
         const d = await readExifDate(file).catch(() => null)
@@ -134,6 +136,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
           empno: e?.value ?? '',
           empnoConfidence: e?.minScore ?? 0,
           empnoNeedsReview: e?.needsReview ?? true,
+          empnoSource: 'device',
           name: '',
           ocrNameRaw: '',
           ocrConfidence: 0,
@@ -148,41 +151,35 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
         { label: `파싱 (회전 ${parsed.rotationUsed}°)`, ms: t2 - t1 },
       ]
 
-      if (!alsoOcr) {
-        setTimings([...baseTimings, { label: '총합', ms: t2 - t0 }])
-        setPhase('done')
-        return
-      }
-
       setPhase('ocring')
-      setProgress('Tesseract 로드 중... (첫 실행 시 20MB 다운로드)')
+      setProgress('서버에서 이름·사번 인식 중…')
       const t3 = performance.now()
-      const worker = await createOcrWorker('kor')
-      const t4 = performance.now()
-
-      const updates = [...initial]
       try {
-        for (let i = 0; i < strips.length; i++) {
-          setProgress(`이름 OCR ${i + 1}/${strips.length}`)
-          const strip = strips[i]
-          const r = await worker.recognize(strip.nameCanvas)
-          const cleaned = r.text.replace(/[|｜ㅣ\s|\/\\_\-.]+/g, '').replace(/\d+/g, '').trim()
-          updates[i] = {
-            ...updates[i],
-            name: cleaned,
-            ocrNameRaw: r.text.trim(),
-            ocrConfidence: r.confidence,
+        const readings = await readRows(strips)
+        const merged = initial.map((n, i) => {
+          const name = readings[i]?.name
+          const empno = readings[i]?.empno
+          const serverEmpno = empno && looksLikeEmpno(empno.text) ? empno : undefined
+          return {
+            ...n,
+            name: name && looksLikeName(name.text) ? name.text : '',
+            ocrNameRaw: name?.text ?? '',
+            ocrConfidence: name?.confidence ?? 0,
+            ...(serverEmpno
+              ? { empno: serverEmpno.text, empnoConfidence: serverEmpno.confidence, empnoNeedsReview: false, empnoSource: 'server' as const }
+              : {}),
           }
-          setNurses([...updates])
-        }
-      } finally { await worker.terminate() }
-      const t5 = performance.now()
-
-      setTimings([...baseTimings,
-        { label: 'Tesseract 로드', ms: t4 - t3 },
-        { label: `이름 OCR (${strips.length}행)`, ms: t5 - t4 },
-        { label: '총합', ms: t5 - t0 },
-      ])
+        })
+        setNurses(merged)
+        const names = merged.filter(n => n.name).length
+        const empnos = merged.filter(n => n.empnoSource === 'server').length
+        setOcrNote(`서버 인식: 이름 ${names}/${merged.length} · 사번 ${empnos}/${merged.length}. 비어 있거나 노란 칸만 확인해 주세요.`)
+      } catch (e) {
+        console.warn('server OCR failed', e)
+        setOcrNote('서버 인식을 쓰지 못해, 이 기기에서 읽은 사번만 채웠어요. 이름은 직접 입력해 주세요.')
+      }
+      const t4 = performance.now()
+      setTimings([...baseTimings, { label: '서버 이름·사번 인식', ms: t4 - t3 }, { label: '총합', ms: t4 - t0 }])
       setProgress('')
       setPhase('done')
     } catch (e) {
@@ -250,8 +247,8 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
       <button onClick={() => onClose()} style={{ marginBottom: 12 }}>‹ 뒤로</button>
       <h2 style={{ marginTop: 0 }}>근무표 사진 추가</h2>
       <p style={{ color: '#666', fontSize: 14 }}>
-        사진을 선택하면 격자를 검출하고 D/E/N/// 코드 · 사번을 자동 인식합니다.
-        이름 OCR 은 옵션 (Tesseract.js 20MB 첫 다운로드). 저장 전에 아래 표에서 사번·이름을 직접 수정할 수 있어요.
+        사진을 선택하면 이 기기에서 근무 코드를 읽고, 이름·사번 칸만 서버로 보내 인식합니다.
+        서버는 받은 칸 이미지를 저장하지 않습니다. 저장 전에 아래 표에서 사번·이름을 고칠 수 있어요.
       </p>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '16px 0', flexWrap: 'wrap' }}>
@@ -277,7 +274,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
             const v = e.target.value
             const r: RotationChoice = v === 'auto' ? 'auto' : (+v as Rotation)
             setRotation(r)
-            if (originalImg) void run(null, r, runOcr)
+            if (originalImg) void run(null, r)
           }} style={{ marginLeft: 4, padding: 4, fontSize: 16 }}>
             <option value="auto">자동</option>
             <option value={0}>0°</option>
@@ -286,20 +283,20 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
             <option value={270}>270° CW</option>
           </select>
         </label>
-        <label><input type="checkbox" checked={runOcr} onChange={e => setRunOcr(e.target.checked)} /> 이름 OCR 실행</label>
         <label style={{ padding: '6px 12px', background: '#2C6BED', color: 'white', borderRadius: 6, cursor: 'pointer' }}>
           사진 선택
           <input type="file" accept="image/*" hidden disabled={disabled}
             onChange={e => {
               const f = e.target.files?.[0]; e.target.value = ''
-              if (f) void run(f, rotation, runOcr)
+              if (f) void run(f, rotation)
             }} />
         </label>
-        {originalImg && <button disabled={disabled} onClick={() => void run(null, rotation, runOcr)}>다시 파싱</button>}
+        {originalImg && <button disabled={disabled} onClick={() => void run(null, rotation)}>다시 파싱</button>}
       </div>
 
       {exifNote && <p style={{ color: '#555', fontSize: 13, margin: '4px 0' }}>{exifNote}</p>}
       {progress && <p style={{ color: '#2C6BED' }}>{progress}</p>}
+      {ocrNote && !progress && <p style={{ color: '#555', fontSize: 13 }}>{ocrNote}</p>}
       {error && <p style={{ color: '#c0392b', whiteSpace: 'pre-wrap' }}>❌ {error}</p>}
 
       {summary && (
@@ -337,7 +334,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
             </thead>
             <tbody>
               {nurses.map(n => (
-                <tr key={n.row} style={n.empnoNeedsReview ? { background: '#FFF7EC' } : undefined}>
+                <tr key={n.row} style={n.empnoNeedsReview || !n.name ? { background: '#FFF7EC' } : undefined}>
                   <td style={cellStyle}>{n.row}</td>
                   <td style={cellStyle}><CanvasCell canvas={n.empnoCanvas} maxWidth={140} /></td>
                   <td style={cellStyle}>
@@ -348,7 +345,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
                       style={{ width: 100, padding: 4, fontSize: 16, fontFamily: 'monospace' }}
                     />
                     <div style={{ fontSize: 10, color: '#888' }}>
-                      신뢰도 {n.empnoConfidence.toFixed(2)}{n.empnoNeedsReview ? ' · 검수' : ''}
+                      {n.empnoSource === 'server' ? '서버' : '기기'} {n.empnoConfidence.toFixed(2)}{n.empnoNeedsReview ? ' · 검수' : ''}
                     </div>
                   </td>
                   <td style={cellStyle}><CanvasCell canvas={n.nameCanvas} maxWidth={180} /></td>
@@ -359,8 +356,8 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
                       onChange={e => updateNurse(n.row, { name: e.target.value.slice(0, 20) })}
                       style={{ width: 120, padding: 4, fontSize: 16 }}
                     />
-                    {n.ocrNameRaw && (
-                      <div style={{ fontSize: 10, color: '#888' }}>OCR "{n.ocrNameRaw}" · {n.ocrConfidence.toFixed(0)}</div>
+                    {n.ocrNameRaw && n.ocrNameRaw !== n.name && (
+                      <div style={{ fontSize: 10, color: '#888' }}>서버가 읽은 글자 "{n.ocrNameRaw}"</div>
                     )}
                   </td>
                 </tr>
