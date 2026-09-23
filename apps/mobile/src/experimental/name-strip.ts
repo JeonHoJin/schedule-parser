@@ -70,15 +70,17 @@ export function rowStrips(sheet: PreparedSheet): RowStrips[] {
     const latticeCell = matrix[row][0]
     const empno = empnoBox(day1, latticeCell, width, gap)
 
+    // A few pixels of margin on every side: OCR misses glyphs that touch the crop edge.
+    const pad = 3
     const nameX = 0
-    const nameY = Math.max(0, Math.round(empno.y - 2))
+    const nameY = Math.max(0, Math.round(empno.y - pad))
     const nameW = Math.max(1, Math.round(empno.x - nameX - 2))
-    const nameH = Math.max(1, Math.min(work.height - nameY, Math.round(empno.h + 4)))
+    const nameH = Math.max(1, Math.min(work.height - nameY, Math.round(empno.h + pad * 2)))
 
-    const empX = Math.max(0, Math.round(empno.x))
-    const empY = Math.max(0, Math.round(empno.y - 2))
-    const empW = Math.max(1, Math.min(work.width - empX, Math.round(empno.w)))
-    const empH = Math.max(1, Math.min(work.height - empY, Math.round(empno.h + 4)))
+    const empX = Math.max(0, Math.round(empno.x - pad))
+    const empY = Math.max(0, Math.round(empno.y - pad))
+    const empW = Math.max(1, Math.min(work.width - empX, Math.round(empno.w + pad * 2)))
+    const empH = Math.max(1, Math.min(work.height - empY, Math.round(empno.h + pad * 2)))
 
     return {
       row,
