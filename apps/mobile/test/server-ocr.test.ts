@@ -12,10 +12,10 @@ describe('서버 OCR 결과 해석', () => {
   })
 
   test('이름·사번 형식', () => {
-    for (const ok of ['김민정', '남궁민수', '이서']) assert.ok(looksLikeName(ok), ok)
-    for (const bad of ['', '김', 'Kim', '김민정1', '|김민정', '김민정남궁민']) assert.ok(!looksLikeName(bad), bad)
-    assert.ok(looksLikeEmpno('193725'))
-    for (const bad of ['19372', '1937255', '19372a', '']) assert.ok(!looksLikeEmpno(bad), bad)
+    for (const ok of ['가나다', '가나다라', '가나']) assert.ok(looksLikeName(ok), ok)
+    for (const bad of ['', '김', 'Kim', '가나다1', '|가나다', '가나다라마바']) assert.ok(!looksLikeName(bad), bad)
+    assert.ok(looksLikeEmpno('123456'))
+    for (const bad of ['12345', '1234567', '12345a', '']) assert.ok(!looksLikeEmpno(bad), bad)
   })
 
   test('이름·사번 순서로 보낸 결과를 행별로 되돌린다', () => {
