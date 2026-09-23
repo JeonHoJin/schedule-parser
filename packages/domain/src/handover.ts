@@ -112,6 +112,14 @@ export function handover(
   }
 }
 
+/**
+ * 그 날 한 시간대의 근무자 전원과 각자의 팀. 날짜 상세의 "근무 × 팀" 표에 쓴다.
+ * 근무표 범위 밖 날짜면 `outOfRange` 가 true 인 빈 목록이다.
+ */
+export function onShift(index: RosterIndex, date: IsoDate, slot: CycleSlot): ShiftGroup {
+  return group(index, date, slot)
+}
+
 /** 한 사람의 한 달 근무를 날짜순으로 */
 export function monthOf(index: RosterIndex, nurseId: string): ShiftCell[] {
   return index.roster.cells

@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  addDays, buildRoster, daysInMonth, handover, isoDate, monthOf,
+  addDays, buildRoster, daysInMonth, handover, isoDate, monthOf, onShift,
   parseCode, RosterIndex, summarize, weekdayKo,
   type RosterInput, type ShiftKind,
 } from '../src/index'
@@ -150,5 +150,21 @@ describe('요약', () => {
     const s = summarize(cells)
     assert.equal(s.D, 6)
     assert.equal(s.OFF, 12)
+  })
+})
+
+describe('onShift — 그 날 한 시간대의 팀 배치', () => {
+  test('행 순서대로 팀을 붙이고, 5번째부터 액팅', () => {
+    const idx = roster({
+      '100001': repeat(['D'], 30), '100002': repeat(['D'], 30), '100003': repeat(['D'], 30),
+      '100004': repeat(['D'], 30), '100005': repeat(['D'], 30), '100006': repeat(['E'], 30),
+    })
+    const d = onShift(idx, '2026-09-03', 'D')
+    assert.deepEqual(d.workers.map(w => [w.nurse.empNo, w.team]), [
+      ['100001', 'A'], ['100002', 'B'], ['100003', 'C'], ['100004', 'D'], ['100005', 'ACTING'],
+    ])
+    assert.deepEqual(onShift(idx, '2026-09-03', 'E').workers.map(w => w.team), ['C'])
+    assert.equal(onShift(idx, '2026-09-03', 'N').workers.length, 0)
+    assert.equal(onShift(idx, '2026-10-01', 'D').outOfRange, true)
   })
 })

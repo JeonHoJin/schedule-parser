@@ -38,9 +38,7 @@ export default function App() {
         if (next?.some(i => i.roster.id === saved.id)) {
           setSelected(saved.id)
           setDate(null)
-          setNotice(saved.carriedMe
-            ? '이 기기에 저장했습니다. 내 이름은 지난 근무표와 같은 사람으로 맞췄어요.'
-            : '이 기기에 저장했습니다.')
+          setNotice('')
         }
       }
       setAdding(false)

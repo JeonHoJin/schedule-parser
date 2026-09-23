@@ -45,6 +45,8 @@ interface NurseEdit {
   ocrConfidence: number
   nameCanvas: HTMLCanvasElement
   empnoCanvas: HTMLCanvasElement
+  /** 표가 잘린 부분 등 근무자가 아닌 줄: 저장할 때 뺀다 */
+  excluded: boolean
 }
 
 const rosterId = ({ year, month }: YearMonth) => `roster-${year}-${String(month).padStart(2, '0')}`
@@ -72,6 +74,7 @@ function buildEdits(parsed: FullParseResult, strips: RowStrips[], readings?: Row
       ocrConfidence: name?.confidence ?? 0,
       nameCanvas: strip.nameCanvas,
       empnoCanvas: strip.empnoCanvas,
+      excluded: false,
     }
   })
 }
@@ -81,6 +84,7 @@ function keepReadings(n: NurseEdit): Partial<NurseEdit> {
   return {
     empno: n.empno, empnoConfidence: n.empnoConfidence, empnoNeedsReview: n.empnoNeedsReview,
     empnoSource: n.empnoSource, name: n.name, ocrNameRaw: n.ocrNameRaw, ocrConfidence: n.ocrConfidence,
+    excluded: n.excluded,
   }
 }
 
@@ -108,7 +112,7 @@ function diagnose(parsed: FullParseResult, strips: RowStrips[]): Diagnostic {
 /** 파싱은 동기 작업이라, 진행 문구가 먼저 그려지도록 한 프레임 양보한다. */
 const frame = () => new Promise(r => setTimeout(r, 30))
 
-export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; carriedMe: boolean }) => void }) {
+export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string }) => void }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
@@ -276,22 +280,27 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
         setPhase('done'); setProgress('')
         return
       }
+      // 뺀 줄은 사람과 근무 칸을 함께 지운다
+      const excludedIds = new Set(nurses.filter(n => n.excluded).map(n => n.originalId))
+      const keptNurses = roster.nurses.filter(n => !excludedIds.has(n.id))
+      const keptCells = roster.cells.filter(c => !excludedIds.has(c.nurseId))
+      if (!keptNurses.length) throw new Error('저장할 근무자가 없습니다.')
       // 편집된 사번·이름을 nurses 배열에 반영
       const editByOriginalId = new Map(nurses.map(n => [n.originalId, n]))
-      const patchedNurses = roster.nurses.map((n, i) => {
-        const edit = editByOriginalId.get(n.id) ?? nurses[i]
+      const patchedNurses = keptNurses.map(n => {
+        const edit = editByOriginalId.get(n.id)
         if (!edit) return { ...n, name: n.name ?? '' }
         const empno = edit.empno.replace(/\D/g, '').trim()
         return { ...n, empNo: empno, id: empno || n.id, name: (edit.name || '').trim() }
       })
       // 사번을 편집한 경우 cells 의 nurseId 도 업데이트
       const idRemap = new Map<string, string>()
-      roster.nurses.forEach((old, i) => {
+      keptNurses.forEach((old, i) => {
         if (old.id !== patchedNurses[i].id) idRemap.set(old.id, patchedNurses[i].id)
       })
       const cells = idRemap.size
-        ? roster.cells.map(c => idRemap.has(c.nurseId) ? { ...c, nurseId: idRemap.get(c.nurseId)! } : c)
-        : roster.cells
+        ? keptCells.map(c => idRemap.has(c.nurseId) ? { ...c, nurseId: idRemap.get(c.nurseId)! } : c)
+        : keptCells
 
       const next = { ...roster, nurses: patchedNurses, cells }
       const myNurseId = carryMyNurse(next, saved)
@@ -301,14 +310,14 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
         review: { empnos: [], cells: [] },
       }
       await saveRoster(local)
-      onClose({ id: roster.id, carriedMe: myNurseId !== undefined })
+      onClose({ id: roster.id })
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장 실패')
       setPhase('error')
     } finally { setProgress('') }
   }
 
-  function updateNurse(row: number, patch: Partial<Pick<NurseEdit, 'name' | 'empno'>>) {
+  function updateNurse(row: number, patch: Partial<Pick<NurseEdit, 'name' | 'empno' | 'excluded'>>) {
     setNurses(prev => prev.map(n => n.row === row ? { ...n, ...patch } : n))
   }
 
@@ -327,6 +336,8 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
     </label>
   )
   const busy = phase === 'decoding' || phase === 'parsing' || phase === 'ocring'
+  const kept = nurses.filter(n => !n.excluded).length
+  const excluded = nurses.length - kept
 
   return (
     <div className="upload-page">
@@ -399,8 +410,8 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
                 </button>
               </div>
             )}
-            <p className="result-note">간호사 {roster.nurses.length}명 · {ocrNote}</p>
-            <button type="button" className="primary save-button" disabled={disabled || editPeriod !== null}
+            <p className="result-note">근무자 {kept}명{excluded ? ` (${excluded}줄 뺌)` : ''} · {ocrNote}</p>
+            <button type="button" className="primary save-button" disabled={disabled || editPeriod !== null || kept === 0}
               onClick={saveAndReturn}>{phase === 'saving' ? '저장 중…' : '이 근무표를 저장'}</button>
             {editPeriod !== null && <p className="result-hint">달을 먼저 확인해 주세요.</p>}
             <div className="upload-actions">
@@ -412,10 +423,19 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
 
         {nurses.length > 0 && !busy && (
           <section className="review" aria-labelledby="review-title">
-            <h2 id="review-title">이름·사번 확인 ({nurses.length}명)</h2>
-            <p className="review-hint">틀리거나 빈 칸만 고쳐 주세요. 노란 줄이 확인이 필요한 사람이에요.</p>
+            <h2 id="review-title">이름·사번 확인 ({kept}명)</h2>
+            <p className="review-hint">틀리거나 빈 칸만 고쳐 주세요. 표가 잘린 부분처럼 근무자가 아닌 줄은 ✕ 로 빼 주세요.</p>
             <ol className="review-list">
               {nurses.map((n, i) => (
+                n.excluded ? (
+                  <li key={n.row} className="review-item excluded">
+                    <span className="review-no">{i + 1}</span>
+                    <span className="excluded-text">
+                      뺀 줄{n.name || n.empno ? ` · ${n.name || n.empno}` : ''}
+                    </span>
+                    <button type="button" className="restore-button" onClick={() => updateNurse(n.row, { excluded: false })}>되돌리기</button>
+                  </li>
+                ) : (
                 <li key={n.row} className={n.empnoNeedsReview || !n.name ? 'review-item warn' : 'review-item'}>
                   <span className="review-no">{i + 1}</span>
                   <label className="review-field">
@@ -430,7 +450,10 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
                       className="mono" onChange={e => updateNurse(n.row, { empno: e.target.value.replace(/\D/g, '').slice(0, 10) })} />
                     {n.empnoNeedsReview && <small>확인 필요</small>}
                   </label>
+                  <button type="button" className="remove-button" aria-label={`${i + 1}번 줄 빼기`} title="이 줄 빼기"
+                    onClick={() => updateNurse(n.row, { excluded: true })}>✕</button>
                 </li>
+                )
               ))}
             </ol>
           </section>

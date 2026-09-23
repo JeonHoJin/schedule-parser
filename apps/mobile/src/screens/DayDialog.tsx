@@ -5,10 +5,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import {
-  addDays, handover, monthOf, weekdayKo, type IsoDate, type ShiftKind,
+  addDays, handover, monthOf, onShift, weekdayKo,
+  type CycleSlot, type IsoDate, type Nurse, type ShiftGroup, type ShiftKind, type Team,
 } from '@sp/domain'
 import { ShiftBadge, rawWorthShowing } from '../components/ShiftBadge'
-import { WorkerList } from '../components/WorkerList'
 import { color, shiftColor, space } from '../theme'
 import { displayName, useRoster } from '../data'
 import { MAX_OTHER_LABEL } from '../roster-edit'
@@ -18,6 +18,39 @@ const CHOICES: Array<{ kind: ShiftKind; label: string }> = [
   { kind: 'D', label: 'D' }, { kind: 'E', label: 'E' }, { kind: 'N', label: 'N' },
   { kind: 'OFF', label: '휴' }, { kind: 'OTHER', label: '기타' }, { kind: 'EMPTY', label: '비움' },
 ]
+
+const SLOTS: CycleSlot[] = ['D', 'E', 'N']
+const TEAMS: Team[] = ['A', 'B', 'C', 'D', 'ACTING']
+const TEAM_LABEL: Record<Team, string> = { A: 'A', B: 'B', C: 'C', D: 'D', ACTING: '액팅' }
+const SLOT_NAME: Record<CycleSlot, string> = { D: '데이', E: '이브닝', N: '나이트' }
+
+/** 표 칸에 들어갈 짧은 이름: 이름이 없으면 사번 */
+const shortName = (n: Nurse) => n.name?.trim() || n.empNo || '?'
+
+/** 인계 상대: 이전·다음 시간대에서 나와 같은 팀. 액팅은 정해진 상대가 없다. */
+function partners(group: ShiftGroup, myTeam: Team | null) {
+  if (!myTeam || myTeam === 'ACTING') return []
+  return group.workers.filter(w => w.team === myTeam)
+}
+
+function HandoverLine({ label, group, partnersOf, today }: {
+  label: string; group: ShiftGroup; partnersOf: ReturnType<typeof partners>; today: IsoDate
+}) {
+  const when = group.date === today ? '' : group.date < today ? '전날 ' : '다음날 '
+  return (
+    <div className="ho-line">
+      <span className="ho-label">{label}</span>
+      {group.outOfRange
+        ? <span className="ho-none">{group.date < today ? '이전' : '다음'} 달 근무표를 추가하면 볼 수 있어요</span>
+        : partnersOf.length === 0
+          ? <span className="ho-none">없음</span>
+          : <span>
+              <span className={`slot-chip slot-${group.slot}`}>{when}{group.slot}</span>
+              {partnersOf.map(w => <span key={w.nurse.id} className="ho-name">{displayName(w.nurse)}</span>)}
+            </span>}
+    </div>
+  )
+}
 
 export type EditCell = (nurseId: string, date: IsoDate, kind: ShiftKind, label?: string) => Promise<void>
 
@@ -69,12 +102,21 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
   const day = Number(date.slice(-2))
   const kind = mine?.kind ?? 'EMPTY'
   const title = `${Number(date.slice(5, 7))}월 ${day}일 (${weekdayKo(date)})`
+  const myTeam = chain?.myTeam ?? null
+  const groups = { D: onShift(index, date, 'D'), E: onShift(index, date, 'E'), N: onShift(index, date, 'N') }
+  // 오늘 표에 보이는 인계 상대(같은 날의 이전·다음 시간대)를 표시한다.
+  const highlight = new Set(chain
+    ? [...partners(chain.previous, myTeam), ...partners(chain.next, myTeam)]
+      .filter(w => w.cell.date === date).map(w => w.nurse.id)
+    : [])
 
   const all = index.onDate(date)
     .map(c => ({ cell: c, nurse: index.nurse(c.nurseId)! }))
     .filter(x => x.nurse)
     .sort((a, b) => ORDER.indexOf(a.cell.kind) - ORDER.indexOf(b.cell.kind) || a.nurse.order - b.nurse.order)
   const working = all.filter(x => x.cell.kind !== 'EMPTY').length
+  const offCount = all.filter(x => x.cell.kind === 'OFF').length
+  const otherCount = all.filter(x => x.cell.kind === 'OTHER').length
 
   async function save(nurseId: string, k: ShiftKind, label?: string) {
     setSaving(true)
@@ -98,25 +140,53 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
           <button type="button" className="day-close" aria-label="닫기" onClick={close}>✕</button>
         </div>
         <div className="day-body">
-          <View style={styles.myShift}>
-            <Text style={styles.label}>내 근무</Text>
+          <div className="my-shift">
+            <span className="my-label">내 근무</span>
             <ShiftBadge kind={kind} size="lg" />
-            {kind === 'EMPTY' && <Text style={styles.raw}>비어 있음</Text>}
-            {mine && rawWorthShowing(mine.raw, kind) && <Text style={styles.raw}>근무표 표기 “{mine.raw}”</Text>}
-          </View>
+            {myTeam && <span className="my-team">{myTeam === 'ACTING' ? '액팅' : `${myTeam}팀`}</span>}
+            {kind === 'EMPTY' && <span className="my-raw">비어 있음</span>}
+            {mine && rawWorthShowing(mine.raw, kind) && <span className="my-raw">근무표 표기 “{mine.raw}”</span>}
+          </div>
 
-          {!chain ? (
-            <Text style={styles.noChain}>
-              {kind === 'OFF' ? '쉬는 날이에요.' : '이 날은 인수인계 체인이 없어요.'}
-            </Text>
-          ) : (
-            <View style={styles.chain}>
-              <WorkerList title="이전 근무자" hint="나에게 인계" group={chain.previous}
-                showDate={chain.previous.date !== date} myTeam={chain.myTeam} />
-              <WorkerList title="동시간 근무자" hint="함께 근무" group={chain.concurrent} />
-              <WorkerList title="다음 근무자" hint="내가 인계" group={chain.next}
-                showDate={chain.next.date !== date} myTeam={chain.myTeam} />
-            </View>
+          <div className="team-grid-wrap">
+            <table className="team-grid">
+              <thead>
+                <tr><th aria-label="근무" />{TEAMS.map(t => <th key={t} scope="col">{TEAM_LABEL[t]}</th>)}</tr>
+              </thead>
+              <tbody>
+                {SLOTS.map(slot => (
+                  <tr key={slot} className={`slot-${slot}`}>
+                    <th scope="row"><span className={`slot-chip slot-${slot}`} title={SLOT_NAME[slot]}>{slot}</span></th>
+                    {TEAMS.map(team => (
+                      <td key={team}>
+                        {groups[slot].workers.filter(w => w.team === team).map(w => {
+                          const isMe = w.nurse.id === me.id
+                          const isPartner = highlight.has(w.nurse.id)
+                          return (
+                            <span key={w.nurse.id} title={displayName(w.nurse)}
+                              className={`grid-name${isMe ? ' me' : ''}${isPartner ? ' partner' : ''}`}>
+                              {shortName(w.nurse)}
+                            </span>
+                          )
+                        })}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {chain && (
+            <div className="handover">
+              <HandoverLine label="인계 받기" group={chain.previous} partnersOf={partners(chain.previous, chain.myTeam)} today={date} />
+              <HandoverLine label="인계 주기" group={chain.next} partnersOf={partners(chain.next, chain.myTeam)} today={date} />
+              {chain.myTeam === 'ACTING' && <p className="ho-note">액팅은 정해진 인계 상대가 없어요.</p>}
+            </div>
+          )}
+          {!chain && kind === 'OFF' && <p className="ho-note">쉬는 날이에요.</p>}
+          {offCount + otherCount > 0 && (
+            <p className="off-line">휴무 {offCount}명{otherCount ? ` · 기타 ${otherCount}명` : ''}</p>
           )}
 
           <Pressable onPress={() => setExpanded(v => !v)} style={styles.toggle} accessibilityRole="button">
@@ -190,14 +260,6 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
 }
 
 const styles = StyleSheet.create({
-  myShift: { flexDirection: 'row', alignItems: 'center', gap: space(3), flexWrap: 'wrap' },
-  label: { fontSize: 13, color: color.muted, fontWeight: '600' },
-  raw: { fontSize: 13, color: color.muted },
-  noChain: { fontSize: 15, color: color.muted, marginTop: space(5) },
-  chain: {
-    marginTop: space(5), backgroundColor: color.card, borderRadius: 16,
-    padding: space(4), paddingBottom: 0, borderWidth: 1, borderColor: color.line,
-  },
   toggle: { marginTop: space(4), paddingVertical: space(3), alignItems: 'center' },
   toggleText: { fontSize: 14, color: color.accent, fontWeight: '600' },
   editHint: { fontSize: 12, color: color.muted, marginBottom: space(2), lineHeight: 17 },

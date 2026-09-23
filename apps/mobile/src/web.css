@@ -101,7 +101,7 @@ button.danger { color: #a12727; border-color: #e3b9b9; }
 .review h2 { font-size: 16px; margin: 0; }
 .review-hint { font-size: 13px; color: #5b6570; margin: 4px 0 10px; }
 .review-list { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e6ea; border-radius: 16px; overflow: hidden; }
-.review-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 12px; border-bottom: 1px solid #e3e6ea; }
+.review-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) 32px; gap: 10px; align-items: start; padding: 10px 12px; border-bottom: 1px solid #e3e6ea; }
 .review-item:last-child { border-bottom: 0; }
 .review-item.warn { background: #fff7ec; }
 .review-no { font-size: 12px; color: #8a8a91; padding-top: 4px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -116,3 +116,40 @@ button.danger { color: #a12727; border-color: #e3b9b9; }
 .diagnostics summary { cursor: pointer; font-weight: 600; }
 .diagnostics p { line-height: 1.6; }
 .timing { display: flex; justify-content: space-between; padding: 2px 0; font-variant-numeric: tabular-nums; }
+
+/* 날짜 팝업: 근무 × 팀 표 */
+.my-shift { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.my-label { font-size: 13px; color: #8a8a91; font-weight: 600; }
+.my-team { font-size: 15px; font-weight: 700; color: #17171a; }
+.my-raw { font-size: 13px; color: #8a8a91; }
+.team-grid-wrap { margin-top: 14px; background: #fff; border: 1px solid #e6e6ea; border-radius: 14px; overflow: hidden; }
+.team-grid { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.team-grid th, .team-grid td { border-bottom: 1px solid #eeeef1; border-right: 1px solid #eeeef1; padding: 6px 3px; text-align: center; vertical-align: middle; }
+.team-grid tr > :last-child { border-right: 0; }
+.team-grid tbody tr:last-child > * { border-bottom: 0; }
+.team-grid thead th { font-size: 12px; font-weight: 700; color: #5b6570; background: #fafafb; padding: 8px 2px; }
+.team-grid thead th:first-child, .team-grid tbody th { width: 38px; }
+.team-grid td { height: 46px; }
+.slot-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 22px; padding: 0 6px; border-radius: 6px; font-size: 12px; font-weight: 800; }
+.slot-D { --fg: #0b5cc4; --bg: #dcebff; }
+.slot-E { --fg: #b4560a; --bg: #ffe9d2; }
+.slot-N { --fg: #3b2c86; --bg: #e4e0fa; }
+.slot-chip { color: var(--fg); background: var(--bg); }
+.team-grid tbody tr td { background: #fff; background: color-mix(in srgb, var(--bg) 28%, white); }
+.grid-name { display: block; margin: 1px auto; padding: 3px 2px; border-radius: 7px; border: 2px solid transparent; color: var(--fg); font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid-name.me { background: var(--fg); color: white; font-weight: 800; }
+.grid-name.partner { border-color: var(--fg); background: white; }
+.handover { margin-top: 12px; background: #fff; border: 1px solid #e6e6ea; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.ho-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 14px; }
+.ho-line > span:last-child { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ho-label { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: #5b6570; min-width: 58px; }
+.ho-name { font-weight: 700; color: #17171a; }
+.ho-none { color: #b9b9c0; font-size: 13px; }
+.ho-note { font-size: 12px; color: #8a8a91; margin: 0; }
+.day-body > .ho-note { margin-top: 12px; font-size: 14px; }
+.off-line { font-size: 13px; color: #8a8a91; margin: 10px 2px 0; }
+.remove-button { min-height: 32px; min-width: 32px; padding: 0; border: 0; background: transparent; color: #8a8a91; font-size: 16px; line-height: 1; }
+.remove-button:hover { color: #a12727; }
+.review-item.excluded { grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; background: #f4f4f6; }
+.excluded-text { font-size: 13px; color: #8a8a91; text-decoration: line-through; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.restore-button { min-height: 32px; padding: 4px 10px; font-size: 13px; }
