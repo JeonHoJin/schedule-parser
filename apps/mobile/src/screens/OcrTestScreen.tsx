@@ -316,173 +316,153 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; car
   const samePeriod = !!editPeriod && !!period && editPeriod.year === period.year && editPeriod.month === period.month
   const validYear = !!editPeriod && editPeriod.year >= 2000 && editPeriod.year <= 2200
 
-  return (
-    <div style={{ height: '100vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-     <div style={{ padding: 20, paddingBottom: 60, maxWidth: 960, margin: '0 auto', fontFamily: 'system-ui' }}>
-      <button onClick={() => onClose()} style={{ marginBottom: 12 }}>‹ 뒤로</button>
-      <h2 style={{ marginTop: 0 }}>근무표 사진 추가</h2>
-      <p style={{ color: '#666', fontSize: 14 }}>
-        근무표 사진을 고르면 방향과 년·월은 자동으로 찾아요. 근무 코드는 이 기기에서 읽고,
-        제목·이름·사번 칸만 서버로 보내 인식합니다. 서버는 받은 이미지를 저장하지 않아요.
-      </p>
+  const photoInput = (label: string, className: string) => (
+    <label className={`${className}${disabled ? ' disabled' : ''}`}>
+      {label}
+      <input type="file" accept="image/*" hidden disabled={disabled}
+        onChange={e => {
+          const f = e.target.files?.[0]; e.target.value = ''
+          if (f) void pick(f)
+        }} />
+    </label>
+  )
+  const busy = phase === 'decoding' || phase === 'parsing' || phase === 'ocring'
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '16px 0', flexWrap: 'wrap' }}>
-        <label style={{ padding: '10px 16px', background: disabled ? '#9db5ec' : '#2C6BED', color: 'white', borderRadius: 8, cursor: disabled ? 'default' : 'pointer', fontWeight: 600 }}>
-          {originalImg ? '다른 사진 선택' : '사진 선택'}
-          <input type="file" accept="image/*" hidden disabled={disabled}
-            onChange={e => {
-              const f = e.target.files?.[0]; e.target.value = ''
-              if (f) void pick(f)
-            }} />
-        </label>
-        {originalImg && phase !== 'cropping' && (
-          <button disabled={disabled} onClick={() => { resetResults(); setPhase('cropping') }}>다시 자르기</button>
+  return (
+    <div className="upload-page">
+      <header className="local-header">
+        <div className="title-row">
+          <button type="button" className="back-button" aria-label="근무표로 돌아가기" onClick={() => onClose()}>‹</button>
+          <h1>근무표 사진 추가</h1>
+        </div>
+      </header>
+
+      <div className="upload-body">
+        {!originalImg && !busy && (
+          <div className="photo-pick">
+            {photoInput('사진 선택', 'photo-button')}
+          </div>
+        )}
+
+        {busy && (
+          <div className="photo-pick">
+            <span className="spinner" aria-hidden="true" />
+            <p className="progress" role="status">{progress}</p>
+          </div>
+        )}
+
+        {phase === 'cropping' && originalImg && (
+          <CropStep image={originalImg} initial={cropRect}
+            onCancel={() => { setOriginalImg(null); setPhase('idle') }}
+            onConfirm={rect => { setCropRect(rect); void analyze(rect) }} />
+        )}
+
+        {error && <p className="local-error upload-error" role="alert">{error}</p>}
+        {phase === 'error' && originalImg && (
+          <div className="upload-actions">
+            <button type="button" onClick={() => { resetResults(); setPhase('cropping') }}>다시 자르기</button>
+            {photoInput('다른 사진', 'secondary-button')}
+          </div>
+        )}
+
+        {roster && period && !busy && (
+          <section className="result-card" aria-label="인식 결과">
+            <h2>{period.year}년 {period.month}월 근무표{roster.ward ? ` · ${roster.ward}` : ''}</h2>
+            <p className={period.source === 'photo' ? 'result-source warn' : 'result-source'}>
+              {period.source === 'title' && '표 제목에서 읽었어요.'}
+              {period.source === 'manual' && '직접 고른 달이에요.'}
+              {period.source === 'photo' && '표 제목을 읽지 못해 촬영 날짜로 짐작했어요. 맞는지 확인해 주세요.'}
+              {editPeriod === null && (
+                <button type="button" className="link-button" disabled={disabled}
+                  onClick={() => setEditPeriod({ year: period.year, month: period.month })}>달 바꾸기</button>
+              )}
+            </p>
+            {editPeriod && (
+              <div className="period-edit">
+                <label>년
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4} aria-label="근무표 년도"
+                    value={editPeriod.year ? String(editPeriod.year) : ''}
+                    onChange={e => {
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 4)
+                      setEditPeriod({ ...editPeriod, year: digits ? +digits : 0 })
+                    }} />
+                </label>
+                <label>월
+                  <select value={editPeriod.month} aria-label="근무표 월"
+                    onChange={e => setEditPeriod({ ...editPeriod, month: +e.target.value })}>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
+                  </select>
+                </label>
+                <button type="button" disabled={disabled || !validYear}
+                  onClick={() => samePeriod ? setEditPeriod(null) : void reparseFor(editPeriod)}>
+                  {samePeriod ? '이 달이 맞아요' : '이 달로 다시 읽기'}
+                </button>
+              </div>
+            )}
+            <p className="result-note">간호사 {roster.nurses.length}명 · {ocrNote}</p>
+            <button type="button" className="primary save-button" disabled={disabled || editPeriod !== null}
+              onClick={saveAndReturn}>{phase === 'saving' ? '저장 중…' : '이 근무표를 저장'}</button>
+            {editPeriod !== null && <p className="result-hint">달을 먼저 확인해 주세요.</p>}
+            <div className="upload-actions">
+              <button type="button" disabled={disabled} onClick={() => { resetResults(); setPhase('cropping') }}>다시 자르기</button>
+              {photoInput('다른 사진', 'secondary-button')}
+            </div>
+          </section>
+        )}
+
+        {nurses.length > 0 && !busy && (
+          <section className="review" aria-labelledby="review-title">
+            <h2 id="review-title">이름·사번 확인 ({nurses.length}명)</h2>
+            <p className="review-hint">틀리거나 빈 칸만 고쳐 주세요. 노란 줄이 확인이 필요한 사람이에요.</p>
+            <ol className="review-list">
+              {nurses.map((n, i) => (
+                <li key={n.row} className={n.empnoNeedsReview || !n.name ? 'review-item warn' : 'review-item'}>
+                  <span className="review-no">{i + 1}</span>
+                  <label className="review-field">
+                    <CanvasCell canvas={n.nameCanvas} />
+                    <input type="text" value={n.name} aria-label={`${i + 1}번 이름`} placeholder="이름"
+                      onChange={e => updateNurse(n.row, { name: e.target.value.slice(0, 20) })} />
+                    {n.ocrNameRaw && n.ocrNameRaw !== n.name && <small>읽은 글자 “{n.ocrNameRaw}”</small>}
+                  </label>
+                  <label className="review-field">
+                    <CanvasCell canvas={n.empnoCanvas} />
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={n.empno} aria-label={`${i + 1}번 사번`} placeholder="사번"
+                      className="mono" onChange={e => updateNurse(n.row, { empno: e.target.value.replace(/\D/g, '').slice(0, 10) })} />
+                    {n.empnoNeedsReview && <small>확인 필요</small>}
+                  </label>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
+        {diag && !busy && (
+          <details className="diagnostics">
+            <summary>인식 진단 정보</summary>
+            <p>
+              작업 이미지 {diag.workSize.w}×{diag.workSize.h} · 격자 {diag.rows}행 × {diag.cols}열 · 간호사 {diag.nurseRows}명
+              <br />회전 {diag.rotation}° (자동 감지 점수 {diag.score})
+              <br />코드 분포: {Object.entries(diag.counts).map(([k, v]) => `${k}:${v}`).join(' · ')}
+              <br />노랑 = 이름 칸, 파랑 = 사번 칸으로 크롭한 영역
+            </p>
+            <CanvasCell canvas={diag.overlay} />
+            {timings.map(t => (
+              <div key={t.label} className="timing">
+                <span>{t.label}</span>
+                <span>{t.ms.toFixed(0)} ms</span>
+              </div>
+            ))}
+          </details>
         )}
       </div>
-
-      {phase === 'cropping' && originalImg && (
-        <CropStep image={originalImg} initial={cropRect}
-          onCancel={() => { setOriginalImg(null); setPhase('idle') }}
-          onConfirm={rect => { setCropRect(rect); void analyze(rect) }} />
-      )}
-
-      {progress && <p style={{ color: '#2C6BED' }}>{progress}</p>}
-      {error && <p style={{ color: '#c0392b', whiteSpace: 'pre-wrap' }}>❌ {error}</p>}
-
-      {roster && period && (
-        <div style={{ background: '#EEF9EE', padding: 14, borderRadius: 10, margin: '16px 0' }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>
-            {period.year}년 {period.month}월 근무표{roster.ward ? ` · ${roster.ward}` : ''}
-          </div>
-          <div style={{ fontSize: 13, color: period.source === 'photo' ? '#B4560A' : '#4b5b52', marginTop: 4 }}>
-            {period.source === 'title' && '표 제목에서 읽었어요.'}
-            {period.source === 'manual' && '직접 고른 달이에요.'}
-            {period.source === 'photo' && '표 제목을 읽지 못해 촬영 날짜로 짐작했어요. 맞는지 확인해 주세요.'}
-            {editPeriod === null && (
-              <button disabled={disabled} onClick={() => setEditPeriod({ year: period.year, month: period.month })}
-                style={{ marginLeft: 8, minHeight: 0, padding: '2px 8px', fontSize: 13 }}>달 바꾸기</button>
-            )}
-          </div>
-          {editPeriod && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-              <label>년
-                <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4} aria-label="근무표 년도"
-                  value={editPeriod.year ? String(editPeriod.year) : ''}
-                  onChange={e => {
-                    const digits = e.target.value.replace(/\D/g, '').slice(0, 4)
-                    setEditPeriod({ ...editPeriod, year: digits ? +digits : 0 })
-                  }}
-                  style={{ width: 70, marginLeft: 4, padding: 4, fontSize: 16 }} />
-              </label>
-              <label>월
-                <select value={editPeriod.month} aria-label="근무표 월" onChange={e => setEditPeriod({ ...editPeriod, month: +e.target.value })}
-                  style={{ marginLeft: 4, padding: 4, fontSize: 16, width: 'auto' }}>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
-                </select>
-              </label>
-              <button disabled={disabled || !validYear}
-                onClick={() => samePeriod ? setEditPeriod(null) : void reparseFor(editPeriod)}>
-                {samePeriod ? '이 달이 맞아요' : '이 달로 다시 읽기'}
-              </button>
-            </div>
-          )}
-          <p style={{ fontSize: 14, margin: '10px 0 0' }}>
-            간호사 {roster.nurses.length}명 · {ocrNote}
-          </p>
-          <button
-            disabled={disabled || editPeriod !== null}
-            onClick={saveAndReturn}
-            style={{ marginTop: 12, padding: '8px 16px', background: '#2C6BED', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
-          >이 근무표를 저장</button>
-          {editPeriod !== null && <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>달을 먼저 확인해 주세요</span>}
-        </div>
-      )}
-
-      {nurses.length > 0 && (
-        <div>
-          <h3>간호사 목록 검수 ({nurses.length}명)</h3>
-          <p style={{ fontSize: 13, color: '#666', marginTop: 0 }}>
-            사번·이름이 틀린 곳을 직접 수정해 주세요. 사번을 바꾸면 근무 기록의 소속도 함께 이동합니다.
-          </p>
-          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#f5f5f7' }}>
-                <th style={cellStyle}>행</th>
-                <th style={cellStyle}>사번 이미지</th>
-                <th style={cellStyle}>사번</th>
-                <th style={cellStyle}>이름 이미지</th>
-                <th style={cellStyle}>이름</th>
-              </tr>
-            </thead>
-            <tbody>
-              {nurses.map(n => (
-                <tr key={n.row} style={n.empnoNeedsReview || !n.name ? { background: '#FFF7EC' } : undefined}>
-                  <td style={cellStyle}>{n.row}</td>
-                  <td style={cellStyle}><CanvasCell canvas={n.empnoCanvas} maxWidth={140} /></td>
-                  <td style={cellStyle}>
-                    <input
-                      type="text" inputMode="numeric" pattern="[0-9]*"
-                      value={n.empno}
-                      onChange={e => updateNurse(n.row, { empno: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                      style={{ width: 100, padding: 4, fontSize: 16, fontFamily: 'monospace' }}
-                    />
-                    <div style={{ fontSize: 10, color: '#888' }}>
-                      {n.empnoSource === 'server' ? '서버' : '기기'} {n.empnoConfidence.toFixed(2)}{n.empnoNeedsReview ? ' · 검수' : ''}
-                    </div>
-                  </td>
-                  <td style={cellStyle}><CanvasCell canvas={n.nameCanvas} maxWidth={180} /></td>
-                  <td style={cellStyle}>
-                    <input
-                      type="text"
-                      value={n.name}
-                      onChange={e => updateNurse(n.row, { name: e.target.value.slice(0, 20) })}
-                      style={{ width: 120, padding: 4, fontSize: 16 }}
-                    />
-                    {n.ocrNameRaw && n.ocrNameRaw !== n.name && (
-                      <div style={{ fontSize: 10, color: '#888' }}>서버가 읽은 글자 "{n.ocrNameRaw}"</div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {diag && (
-        <details style={{ background: '#F7F7F8', padding: 12, borderRadius: 8, margin: '16px 0' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>인식 진단 정보</summary>
-          <p style={{ fontSize: 13, color: '#555' }}>
-            작업 이미지 {diag.workSize.w}×{diag.workSize.h} · 격자 {diag.rows}행 × {diag.cols}열 · 간호사 {diag.nurseRows}명
-            <br />회전 {diag.rotation}° (자동 감지 점수 {diag.score})
-            <br />코드 분포: {Object.entries(diag.counts).map(([k, v]) => `${k}:${v}`).join(' · ')}
-            <br />노랑 = 이름 칸, 파랑 = 사번 칸으로 크롭한 영역
-          </p>
-          <CanvasCell canvas={diag.overlay} maxWidth={840} />
-          {timings.map(t => (
-            <div key={t.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: 13 }}>
-              <span>{t.label}</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{t.ms.toFixed(0)} ms</span>
-            </div>
-          ))}
-        </details>
-      )}
-     </div>
     </div>
   )
 }
 
-const cellStyle: React.CSSProperties = {
-  border: '1px solid #ddd', padding: 6, textAlign: 'left', verticalAlign: 'middle',
-}
-
-function CanvasCell({ canvas, maxWidth }: { canvas: HTMLCanvasElement; maxWidth?: number }) {
+function CanvasCell({ canvas }: { canvas: HTMLCanvasElement }) {
   return (
-    <div ref={el => {
-      if (el && !el.contains(canvas)) {
-        el.innerHTML = ''; el.appendChild(canvas)
-        if (maxWidth) { canvas.style.maxWidth = maxWidth + 'px'; canvas.style.height = 'auto' }
-      }
+    <div className="canvas-cell" ref={el => {
+      if (el && !el.contains(canvas)) { el.innerHTML = ''; el.appendChild(canvas) }
     }} />
   )
 }

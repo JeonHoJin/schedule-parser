@@ -56,9 +56,7 @@ export function CropStep({ image, initial, onConfirm, onCancel }: {
 
   return (
     <div className="crop-step">
-      <p className="crop-hint">
-        근무표 아래 서명·메모처럼 필요 없는 부분은 잘라 주세요. 모서리나 변을 끌어 조절하고, 안쪽을 끌면 영역이 움직여요.
-      </p>
+      <p className="crop-hint">표 밖의 필요 없는 부분은 모서리를 끌어 잘라 주세요.</p>
       <div className="crop-box" ref={box} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
         <img src={url} alt="선택한 근무표 사진" draggable={false} />
         <div className="crop-shade" style={{ left: 0, top: 0, width: '100%', height: pct(rect.y) }} />
