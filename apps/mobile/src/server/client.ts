@@ -109,8 +109,11 @@ export class ServerClient {
   }
 
   /** `/op/{name}[/{version}]` 호출. 401 이면 한 번 다시 로그인해서 재시도한다. */
-  async op(name: string, init: { method?: string; body?: BodyInit; version?: string; headers?: Record<string, string> } = {}): Promise<Response> {
-    const path = `/op/${name}${init.version ? `/${init.version}` : ''}`
+  async op(name: string, init: {
+    method?: string; body?: BodyInit; version?: string; headers?: Record<string, string>; query?: Record<string, string>
+  } = {}): Promise<Response> {
+    const query = init.query ? `?${new URLSearchParams(init.query)}` : ''
+    const path = `/op/${name}${init.version ? `/${init.version}` : ''}${query}`
     const call = async () => this.fetch(this.opts.base + path, {
       method: init.method ?? 'POST',
       body: init.body,

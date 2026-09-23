@@ -1,5 +1,6 @@
 import type { LocalRoster } from './data'
 import { daysInMonth, isoDate, type ShiftKind } from '@sp/domain'
+import { backup } from './server/rosters'
 
 const invalid = () => new Error('올바른 근무표 JSON 파일이 아닙니다.')
 const object = (v: unknown): Record<string, unknown> => {
@@ -112,10 +113,14 @@ export async function listRosters(): Promise<LocalRoster[]> {
   return data.map(parseBackup).sort((a, b) => b.roster.year - a.roster.year || b.roster.month - a.roster.month)
 }
 
+/** 기기에 저장하고, 서버 백업은 기다리지 않고 뒤에서 보낸다. */
 export async function saveRoster(data: LocalRoster): Promise<void> {
-  await transaction('readwrite', s => s.put(parseBackup(data)))
+  const clean = parseBackup(data)
+  await transaction('readwrite', s => s.put(clean))
+  void backup.save(clean)
 }
 
 export async function removeRoster(id: string): Promise<void> {
   await transaction('readwrite', s => s.delete(id))
+  void backup.remove(id)
 }
