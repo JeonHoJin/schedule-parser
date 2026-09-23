@@ -3,7 +3,7 @@ import { View } from 'react-native'
 import { CalendarScreen } from './src/screens/CalendarScreen'
 import { ShiftDetailScreen } from './src/screens/ShiftDetailScreen'
 import { OcrTestScreen } from './src/screens/OcrTestScreen'
-import { ServerStatus } from './src/components/ServerStatus'
+import { connectInBackground } from './src/server'
 import { displayName, RosterContext, type LocalRoster } from './src/data'
 import { listRosters, parseBackup, removeRoster, saveRoster } from './src/local-storage'
 import './src/web.css'
@@ -91,9 +91,8 @@ export default function App() {
               if (file) void importFile(file)
             }} />
         </label>
-        <button type="button" onClick={() => setOcrTest(true)} style={{ marginLeft: 8 }}>근무표 사진 추가</button>
+        <button type="button" onClick={() => { connectInBackground(); setOcrTest(true) }} style={{ marginLeft: 8 }}>근무표 사진 추가</button>
       </header>
-      <ServerStatus />
       <section className="local-controls" aria-label="저장된 근무표">
         {items.length > 0 && <label>근무표
           <select aria-label="근무표" value={selected} disabled={busy} onChange={e => { setSelected(e.target.value); setDate(null) }}>
