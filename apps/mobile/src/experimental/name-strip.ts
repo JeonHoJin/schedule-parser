@@ -92,6 +92,56 @@ export function rowStrips(sheet: PreparedSheet): RowStrips[] {
   })
 }
 
+function rotate180(src: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement('canvas')
+  out.width = src.width
+  out.height = src.height
+  const ctx = out.getContext('2d')!
+  ctx.translate(src.width, src.height)
+  ctx.rotate(Math.PI)
+  ctx.drawImage(src, 0, 0)
+  return out
+}
+
+/** 흰 여백을 두른다. 가장자리에 붙은 글자는 Vision 이 통째로 빠뜨리는 일이 있었다. */
+function padWhite(src: HTMLCanvasElement, margin: number): HTMLCanvasElement {
+  const out = document.createElement('canvas')
+  out.width = src.width + margin * 2
+  out.height = src.height + margin * 2
+  const ctx = out.getContext('2d')!
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, out.width, out.height)
+  ctx.drawImage(src, margin, margin)
+  return out
+}
+
+export interface TitleStrips {
+  /** 격자 위쪽 — 방향이 맞으면 여기 제목이 있다 */
+  above: HTMLCanvasElement[]
+  /** 격자 아래쪽을 180° 돌린 것 — 사진이 뒤집혀 파싱됐다면 제목이 여기 있다 */
+  below: HTMLCanvasElement[]
+}
+
+/**
+ * 표 제목 줄("OO병동 2026 년 10 월 근무표")을 서버 OCR 로 보낼 조각.
+ * 띠 전체와 가운데 60% 를 함께 보낸다: 넓은 띠만으로는 가장자리 글자·그림자 때문에
+ * 제목을 놓치는 사진이 있었다. 정/역방향 자동 판별은 D·N·// 처럼 뒤집어도 비슷한 글자
+ * 때문에 거의 동점이 나므로, 제목이 어느 쪽에 있는지로 방향을 확정한다.
+ */
+export function titleStrips(sheet: PreparedSheet): TitleStrips {
+  const work = sheet.detect.work
+  const cells = sheet.detect.lattice.matrix.flat()
+  const top = Math.floor(Math.min(...cells.map(c => c.y)))
+  const bottom = Math.ceil(Math.max(...cells.map(c => c.y + c.h)))
+  const midX = Math.round(work.width * 0.2), midW = Math.round(work.width * 0.6)
+  const band = (y: number, h: number) => [cropToCanvas(work, 0, y, work.width, h), cropToCanvas(work, midX, y, midW, h)]
+  return {
+    above: Number.isFinite(top) && top >= 16 ? band(0, top).map(c => padWhite(c, 40)) : [],
+    below: Number.isFinite(bottom) && work.height - bottom >= 16
+      ? band(bottom, work.height - bottom).map(c => padWhite(rotate180(c), 40)) : [],
+  }
+}
+
 /** 이전 API — 이름 크롭만 반환 (기존 코드 호환) */
 export function nameStrips(sheet: PreparedSheet): NameStrip[] {
   return rowStrips(sheet).map(r => ({ row: r.row, canvas: r.nameCanvas, box: r.nameBox }))
