@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
+import type { IsoDate } from '@sp/domain'
 import { CalendarScreen } from './src/screens/CalendarScreen'
-import { ShiftDetailScreen } from './src/screens/ShiftDetailScreen'
+import { DayDialog, type EditCell } from './src/screens/DayDialog'
 import { OcrTestScreen } from './src/screens/OcrTestScreen'
 import { connectInBackground } from './src/server'
 import { displayName, RosterContext, type LocalRoster } from './src/data'
-import { listRosters, parseBackup, removeRoster, saveRoster } from './src/local-storage'
+import { listRosters, removeRoster, saveRoster } from './src/local-storage'
+import { editCell } from './src/roster-edit'
 import './src/web.css'
 
 export default function App() {
   const [items, setItems] = useState<LocalRoster[]>([])
   const [selected, setSelected] = useState('')
-  const [date, setDate] = useState<string | null>(null)
+  const [date, setDate] = useState<IsoDate | null>(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [ocrTest, setOcrTest] = useState(false)
+  const [adding, setAdding] = useState(false)
   const current = items.find(i => i.roster.id === selected)
 
   async function refresh() {
@@ -29,17 +31,19 @@ export default function App() {
       .catch(e => setError(e.message)).finally(() => setBusy(false))
   }, [])
 
-  if (ocrTest) return (
-    <OcrTestScreen onClose={async savedId => {
-      if (savedId) {
+  if (adding) return (
+    <OcrTestScreen onClose={async saved => {
+      if (saved) {
         const next = await refresh().catch(() => null)
-        if (next?.some(i => i.roster.id === savedId)) {
-          setSelected(savedId)
+        if (next?.some(i => i.roster.id === saved.id)) {
+          setSelected(saved.id)
           setDate(null)
-          setNotice('이 기기에 저장했습니다.')
+          setNotice(saved.carriedMe
+            ? '이 기기에 저장했습니다. 내 이름은 지난 근무표와 같은 사람으로 맞췄어요.'
+            : '이 기기에 저장했습니다.')
         }
       }
-      setOcrTest(false)
+      setAdding(false)
     }} />
   )
 
@@ -52,46 +56,43 @@ export default function App() {
     } finally { setBusy(false) }
   }
 
-  async function importFile(file: File) {
-    await run(async () => {
-      if (file.size > 10 * 1024 * 1024) throw new Error('10MB 이하의 JSON 파일을 선택해 주세요.')
-      let raw: unknown
-      try { raw = JSON.parse(await file.text()) } catch { throw new Error('JSON 파일을 읽지 못했습니다.') }
-      const data = parseBackup(raw)
-      const existing = (await listRosters()).find(i => i.roster.id === data.roster.id)
-      if (existing && !window.confirm('같은 근무표가 있습니다. 저장된 내용을 덮어쓸까요?')) return
-      await saveRoster(data)
+  function setMe(myNurseId: string) {
+    if (!current || !myNurseId) return
+    void run(async () => {
+      await saveRoster({ ...current, settings: { ...current.settings, myNurseId } })
       await refresh()
-      setSelected(data.roster.id)
       setDate(null)
-      setNotice('이 기기에 저장했습니다.')
     })
   }
 
-  function exportCurrent() {
+  const edit: EditCell = async (nurseId, day, kind, label) => {
     if (!current) return
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, ...current }, null, 2)], { type: 'application/json' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `schedule-${current.roster.year}-${String(current.roster.month).padStart(2, '0')}.json`
-    link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    const next = editCell(current, nurseId, day, kind, label)
+    await saveRoster(next)
+    setItems(prev => prev.map(i => i.roster.id === next.roster.id ? next : i))
   }
+
+  const me = current?.roster.nurses.find(n => n.id === current.settings.myNurseId)
 
   return (
     <main className="local-app">
       <header className="local-header">
         <h1>근무표</h1>
-        <label className="import-button">
-          JSON 가져오기
-          <input aria-label="근무표 JSON 가져오기" type="file" accept=".json,application/json" disabled={busy}
-            onChange={e => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importFile(file)
-            }} />
-        </label>
-        <button type="button" onClick={() => { connectInBackground(); setOcrTest(true) }} style={{ marginLeft: 8 }}>근무표 사진 추가</button>
+        <div className="header-actions">
+          {current && <button type="button" className="danger" disabled={busy} onClick={() => {
+            const label = `${current.roster.year}년 ${current.roster.month}월`
+            if (window.confirm(`${label} 근무표를 삭제할까요? 삭제하면 되돌릴 수 없습니다.`)) {
+              void run(async () => {
+                await removeRoster(current.roster.id)
+                const next = await refresh()
+                setSelected(next[0]?.roster.id ?? '')
+                setDate(null)
+              })
+            }
+          }}>이 근무표 삭제</button>}
+          <button type="button" className="primary" disabled={busy}
+            onClick={() => { connectInBackground(); setAdding(true) }}>근무표 사진 추가</button>
+        </div>
       </header>
       <section className="local-controls" aria-label="저장된 근무표">
         {items.length > 0 && <label>근무표
@@ -101,46 +102,56 @@ export default function App() {
             </option>)}
           </select>
         </label>}
-        {current && <>
-          <label>내 이름
-            <select aria-label="내 이름" value={current.settings.myNurseId ?? ''} disabled={busy} onChange={e => {
-              const myNurseId = e.target.value
-              if (myNurseId) void run(async () => {
-                await saveRoster({ ...current, settings: { ...current.settings, myNurseId } })
-                await refresh()
-                setDate(null)
-              })
-            }}>
-              <option value="" disabled>선택</option>
-              {current.roster.nurses.map(n => <option key={n.id} value={n.id}>{displayName(n)}</option>)}
-            </select>
-          </label>
-          <div className="local-actions">
-            <button disabled={busy} onClick={exportCurrent}>JSON 백업</button>
-            <button disabled={busy} onClick={() => {
-              if (window.confirm('이 근무표를 기기에서 삭제할까요? 백업이 없으면 복구할 수 없습니다.')) {
-                void run(async () => {
-                  await removeRoster(current.roster.id)
-                  const next = await refresh()
-                  setSelected(next[0]?.roster.id ?? '')
-                  setDate(null)
-                })
-              }
-            }}>삭제</button>
-          </div>
-        </>}
+        {current && me && <label>내 이름
+          <select aria-label="내 이름" value={me.id} disabled={busy} onChange={e => setMe(e.target.value)}>
+            {current.roster.nurses.map(n => <option key={n.id} value={n.id}>{displayName(n)}</option>)}
+          </select>
+        </label>}
       </section>
       {error && <p className="local-error" role="alert">{error}</p>}
       {notice && <p className="local-notice" role="status">{notice}</p>}
-      {busy && <p className="local-empty" role="status">불러오는 중...</p>}
-      {!busy && !current && <p className="local-empty">저장된 근무표가 없습니다.</p>}
-      {current?.settings.myNurseId && <RosterContext.Provider value={current}>
-        <View style={{ flex: 1 }} key={current.roster.id + current.settings.myNurseId}>
-          {date
-            ? <ShiftDetailScreen date={date} onBack={() => setDate(null)} />
-            : <CalendarScreen onPick={setDate} />}
+      {busy && !current && <p className="local-empty" role="status">불러오는 중...</p>}
+      {!busy && !current && (
+        <div className="empty-state">
+          <p className="empty-title">저장된 근무표가 없습니다.</p>
+          <p className="empty-body">위의 "근무표 사진 추가"로 근무표를 찍어 올리면 내 근무와 인수인계 상대를 달력으로 볼 수 있어요.</p>
+        </div>
+      )}
+      {current && !me && <PickMe roster={current} disabled={busy} onPick={setMe} />}
+      {current && me && <RosterContext.Provider value={current}>
+        <View style={{ flex: 1 }} key={current.roster.id + me.id}>
+          <CalendarScreen onPick={setDate} />
+          {date && <DayDialog date={date} onDate={setDate} onClose={() => setDate(null)} onEdit={edit} />}
         </View>
       </RosterContext.Provider>}
     </main>
+  )
+}
+
+/** "내 이름"이 없으면 달력 대신 이 화면에서 먼저 고르게 한다. */
+function PickMe({ roster, disabled, onPick }: { roster: LocalRoster; disabled: boolean; onPick: (id: string) => void }) {
+  const [query, setQuery] = useState('')
+  const nurses = [...roster.roster.nurses].sort((a, b) => a.order - b.order)
+  const q = query.trim()
+  const shown = q ? nurses.filter(n => displayName(n).includes(q) || n.empNo.includes(q)) : nurses
+  return (
+    <section className="pick-me" aria-labelledby="pick-me-title">
+      <h2 id="pick-me-title">이 근무표에서 내 이름을 골라 주세요</h2>
+      <p>{roster.roster.year}년 {roster.roster.month}월 근무표입니다. 고른 사람의 근무와 인수인계 상대를 달력에 보여 드려요. 나중에 위의 "내 이름"에서 바꿀 수 있어요.</p>
+      {nurses.length > 12 && (
+        <input type="search" className="pick-search" placeholder="이름 또는 사번으로 찾기" aria-label="이름 또는 사번으로 찾기"
+          value={query} onChange={e => setQuery(e.target.value)} />
+      )}
+      <div className="pick-grid">
+        {shown.map(n => (
+          <button key={n.id} type="button" disabled={disabled} onClick={() => onPick(n.id)}>
+            {n.name?.trim()
+              ? <><span className="pick-name">{n.name.trim()}</span>{n.empNo && <span className="pick-empno">{n.empNo}</span>}</>
+              : <><span className="pick-name">{n.empNo || '(미확인)'}</span><span className="pick-empno">사번 · 이름 없음</span></>}
+          </button>
+        ))}
+        {shown.length === 0 && <p className="pick-none">찾는 사람이 없습니다.</p>}
+      </div>
+    </section>
   )
 }

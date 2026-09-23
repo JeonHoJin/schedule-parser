@@ -2,7 +2,7 @@ import type { LocalRoster } from './data'
 import { daysInMonth, isoDate, type ShiftKind } from '@sp/domain'
 import { backup } from './server/rosters'
 
-const invalid = () => new Error('올바른 근무표 JSON 파일이 아닙니다.')
+const invalid = () => new Error('근무표 데이터가 올바르지 않습니다.')
 const object = (v: unknown): Record<string, unknown> => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw invalid()
   return v as Record<string, unknown>

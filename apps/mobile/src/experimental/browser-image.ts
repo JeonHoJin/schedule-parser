@@ -81,3 +81,22 @@ export function rgbaToDataUrl(img: Rgba, maxWidth = 400): string {
   dctx.drawImage(src, 0, 0, w, h)
   return dst.toDataURL('image/png')
 }
+
+/** 0~1 비율로 준 영역만 잘라낸 새 Rgba. 전체 영역이면 원본을 그대로 돌려준다. */
+export interface CropRect { x: number; y: number; w: number; h: number }
+export const FULL_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 }
+
+export function cropRgba(src: Rgba, rect: CropRect): Rgba {
+  const x0 = Math.max(0, Math.round(rect.x * src.width))
+  const y0 = Math.max(0, Math.round(rect.y * src.height))
+  const x1 = Math.min(src.width, Math.round((rect.x + rect.w) * src.width))
+  const y1 = Math.min(src.height, Math.round((rect.y + rect.h) * src.height))
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0)
+  if (x0 === 0 && y0 === 0 && w === src.width && h === src.height) return src
+  const out = new Uint8Array(w * h * 4)
+  for (let y = 0; y < h; y++) {
+    const from = ((y0 + y) * src.width + x0) * 4
+    out.set(src.data.subarray(from, from + w * 4), y * w * 4)
+  }
+  return { width: w, height: h, data: out }
+}

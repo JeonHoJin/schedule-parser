@@ -3,18 +3,70 @@ body { background: #f7f8fa; color: #17212b; font-family: -apple-system, BlinkMac
 * { box-sizing: border-box; letter-spacing: 0; }
 .local-app { display: flex; flex-direction: column; height: 100%; width: 100%; min-width: 0; }
 .local-header, .local-controls { width: 100%; max-width: 520px; margin: 0 auto; padding: 16px 20px; }
-.local-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.local-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .local-header h1 { font-size: 22px; margin: 0; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .local-controls { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 0; }
+.local-controls:empty { display: none; }
 .local-controls > label { display: flex; flex: 1 1 140px; min-width: 0; flex-direction: column; gap: 6px; font-size: 13px; }
-select, button, .import-button { min-height: 40px; border: 1px solid #cbd1d7; border-radius: 6px; background: white; color: #17212b; font: inherit; padding: 8px 12px; }
+select, button { min-height: 40px; border: 1px solid #cbd1d7; border-radius: 6px; background: white; color: #17212b; font: inherit; padding: 8px 12px; }
 select { width: 100%; font-size: 14px; }
-button, .import-button { cursor: pointer; font-size: 14px; }
+button { cursor: pointer; font-size: 14px; }
 button:disabled { opacity: .5; cursor: default; }
-button:focus-visible, select:focus-visible, .import-button:focus-within { outline: 2px solid #176953; outline-offset: 3px; }
-.import-button { position: relative; background: #176953; border-color: #176953; color: white; }
-.import-button input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.local-actions { display: flex; flex-basis: 100%; gap: 8px; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #176953; outline-offset: 3px; }
+button.primary { background: #176953; border-color: #176953; color: white; font-weight: 600; }
+button.danger { color: #a12727; border-color: #e3b9b9; }
 .local-empty, .local-error, .local-notice { width: 100%; max-width: 520px; margin: 0 auto; padding: 16px 20px; font-size: 14px; overflow-wrap: anywhere; }
 .local-error { color: #a12727; }
 .local-notice { color: #176953; }
+
+.empty-state { width: 100%; max-width: 520px; margin: 24px auto 0; padding: 24px 20px; text-align: center; }
+.empty-title { font-size: 17px; font-weight: 700; margin: 0 0 6px; }
+.empty-body { font-size: 14px; color: #5b6570; margin: 0 0 16px; line-height: 1.5; }
+
+/* 내 이름 고르기 */
+.pick-me { width: 100%; max-width: 520px; margin: 0 auto; padding: 4px 20px 32px; overflow-y: auto; }
+.pick-me h2 { font-size: 18px; margin: 4px 0 6px; }
+.pick-me > p { font-size: 13px; color: #5b6570; margin: 0 0 14px; line-height: 1.5; }
+.pick-search { width: 100%; min-height: 42px; border: 1px solid #cbd1d7; border-radius: 8px; padding: 8px 12px; font-size: 16px; margin-bottom: 12px; }
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.pick-grid button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; border-radius: 10px; }
+.pick-grid button:hover:not(:disabled) { border-color: #176953; }
+.pick-name { font-size: 15px; font-weight: 600; }
+.pick-empno { font-size: 11px; color: #8a8a91; font-variant-numeric: tabular-nums; }
+.pick-none { grid-column: 1 / -1; color: #8a8a91; font-size: 14px; text-align: center; }
+
+/* 날짜 팝업: 휴대폰에서는 아래에서 올라오는 시트, 넓은 화면에서는 가운데 창 */
+.day-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(15, 20, 25, .42); display: flex; align-items: flex-end; justify-content: center; animation: day-fade .15s ease-out; }
+.day-sheet { width: 100%; max-width: 520px; max-height: 88vh; max-height: 88dvh; background: #f7f7f8; border-radius: 18px 18px 0 0; display: flex; flex-direction: column; box-shadow: 0 -8px 30px rgba(0, 0, 0, .18); outline: none; animation: day-up .2s ease-out; }
+.day-head { display: flex; align-items: center; gap: 4px; padding: 10px 10px 8px 12px; border-bottom: 1px solid #e6e6ea; }
+.day-head h2 { flex: 1; margin: 0; font-size: 18px; font-weight: 800; text-align: center; }
+.day-head button { min-height: 40px; min-width: 40px; padding: 0; border: 0; background: transparent; font-size: 22px; line-height: 1; color: #2c6bed; }
+.day-head .day-close { font-size: 18px; color: #5b6570; }
+.day-body { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
+@media (min-width: 600px) {
+  .day-backdrop { align-items: center; }
+  .day-sheet { border-radius: 18px; max-height: 84vh; }
+}
+@keyframes day-fade { from { opacity: 0; } }
+@keyframes day-up { from { transform: translateY(24px); opacity: .6; } }
+
+/* 사진 자르기 */
+.crop-step { margin: 12px 0 20px; }
+.crop-hint { font-size: 13px; color: #555; margin: 0 0 10px; line-height: 1.5; }
+.crop-box { position: relative; display: block; width: fit-content; max-width: 100%; margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.crop-box img { display: block; max-width: 100%; max-height: 65vh; max-height: 65dvh; }
+.crop-shade { position: absolute; background: rgba(0, 0, 0, .5); pointer-events: none; }
+.crop-rect { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); cursor: move; }
+.crop-handle { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; }
+.crop-handle::after { content: ""; position: absolute; inset: 8px; background: #fff; border: 1px solid rgba(0, 0, 0, .4); border-radius: 3px; }
+.crop-nw { left: 0; top: 0; cursor: nwse-resize; }
+.crop-n { left: 50%; top: 0; cursor: ns-resize; }
+.crop-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.crop-e { left: 100%; top: 50%; cursor: ew-resize; }
+.crop-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.crop-s { left: 50%; top: 100%; cursor: ns-resize; }
+.crop-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.crop-w { left: 0; top: 50%; cursor: ew-resize; }
+.crop-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.crop-actions .primary { background: #2c6bed; border-color: #2c6bed; }

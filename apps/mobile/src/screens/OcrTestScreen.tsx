@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { daysInMonth, type Roster } from '@sp/domain'
 import type { Rgba } from '@sp/vision'
-import { fileToRgba } from '../experimental/browser-image'
+import { cropRgba, fileToRgba, FULL_CROP, type CropRect } from '../experimental/browser-image'
+import { CropStep } from '../components/CropStep'
+import { carryMyNurse } from '../roster-edit'
 import { readExifDate } from '../experimental/exif'
 import { fullParse } from '../experimental/full-parse'
 import { rowStrips, workToCanvas, type RowStrips } from '../experimental/name-strip'
@@ -9,7 +11,7 @@ import { looksLikeEmpno, looksLikeName, readRows } from '../server/ocr'
 import { listRosters, saveRoster } from '../local-storage'
 import type { LocalRoster } from '../data'
 
-type Phase = 'idle' | 'decoding' | 'parsing' | 'ocring' | 'saving' | 'done' | 'error'
+type Phase = 'idle' | 'decoding' | 'cropping' | 'parsing' | 'ocring' | 'saving' | 'done' | 'error'
 type Rotation = 0 | 90 | 180 | 270
 type RotationChoice = Rotation | 'auto'
 
@@ -51,7 +53,7 @@ interface NurseEdit {
 const now = 2026
 const nowMonth = 9
 
-export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void }) {
+export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string; carriedMe: boolean }) => void }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
@@ -65,29 +67,50 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
   const [month, setMonth] = useState(nowMonth)
   const [exifNote, setExifNote] = useState('')
   const [originalImg, setOriginalImg] = useState<Rgba | null>(null)
+  const [cropRect, setCropRect] = useState<CropRect>(FULL_CROP)
+  const [decodeMs, setDecodeMs] = useState(0)
 
-  async function run(file: File | null, choice: RotationChoice) {
-    setPhase('decoding')
-    setProgress('이미지 디코딩 중...')
+  function resetResults() {
     setError('')
     setTimings([]); setDiag(null); setSummary(null); setNurses([]); setOcrNote('')
-    try {
-      if (file) {
-        const d = await readExifDate(file).catch(() => null)
-        if (d) {
-          setYear(d.year); setMonth(d.month)
-          setExifNote(`EXIF: ${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')} 촬영 → 년/월 자동 설정 (필요시 조정)`)
-        } else setExifNote('EXIF 촬영 날짜 없음 — 년/월을 직접 확인하세요')
-      }
+  }
 
+  /** 사진을 고르면 디코딩만 하고 자르기 단계로 넘어간다. */
+  async function pick(file: File) {
+    setPhase('decoding')
+    setProgress('이미지 디코딩 중...')
+    resetResults()
+    try {
+      const d = await readExifDate(file).catch(() => null)
+      if (d) {
+        setYear(d.year); setMonth(d.month)
+        setExifNote(`EXIF: ${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')} 촬영 → 년/월 자동 설정 (필요시 조정)`)
+      } else setExifNote('EXIF 촬영 날짜 없음 — 년/월을 직접 확인하세요')
       const t0 = performance.now()
-      const raw = file ? await fileToRgba(file) : originalImg
-      if (!raw) throw new Error('사진이 선택되지 않았습니다')
-      if (file) setOriginalImg(raw)
+      setOriginalImg(await fileToRgba(file))
+      setDecodeMs(performance.now() - t0)
+      setCropRect(FULL_CROP)
+      setProgress('')
+      setPhase('cropping')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setProgress('')
+      setPhase('error')
+    }
+  }
+
+  async function run(choice: RotationChoice, crop: CropRect) {
+    setPhase('parsing')
+    resetResults()
+    try {
+      if (!originalImg) throw new Error('사진이 선택되지 않았습니다')
+      const t0 = performance.now() - decodeMs
+      const raw = cropRgba(originalImg, crop)
       const t1 = performance.now()
 
-      setPhase('parsing')
       setProgress(choice === 'auto' ? '자동 회전 감지 + 근무표 파싱 중...' : '근무표 파싱 중...')
+      // 파싱은 동기 작업이라, 진행 문구가 먼저 그려지도록 한 프레임 양보한다.
+      await new Promise(r => setTimeout(r, 30))
       const days = daysInMonth(year, month)
       const parsed = fullParse(raw, {
         id: `roster-${year}-${String(month).padStart(2, '0')}`, year, month, days,
@@ -147,7 +170,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
       setNurses(initial)
 
       const baseTimings: Timing[] = [
-        { label: '이미지 디코딩', ms: t1 - t0 },
+        { label: '이미지 디코딩·자르기', ms: t1 - t0 },
         { label: `파싱 (회전 ${parsed.rotationUsed}°)`, ms: t2 - t1 },
       ]
 
@@ -184,6 +207,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
       setPhase('done')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      setProgress('')
       setPhase('error')
     }
   }
@@ -222,13 +246,15 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
         ? summary.roster.cells.map(c => idRemap.has(c.nurseId) ? { ...c, nurseId: idRemap.get(c.nurseId)! } : c)
         : summary.roster.cells
 
+      const roster = { ...summary.roster, nurses: patchedNurses, cells: patchedCells }
+      const myNurseId = carryMyNurse(roster, await listRosters())
       const local: LocalRoster = {
-        roster: { ...summary.roster, nurses: patchedNurses, cells: patchedCells },
-        settings: { reviewThreshold: 0.8 },
+        roster,
+        settings: { myNurseId, reviewThreshold: 0.8 },
         review: { empnos: [], cells: [] },
       }
       await saveRoster(local)
-      onClose(summary.roster.id)
+      onClose({ id: summary.roster.id, carriedMe: myNurseId !== undefined })
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장 실패')
       setPhase('error')
@@ -274,7 +300,7 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
             const v = e.target.value
             const r: RotationChoice = v === 'auto' ? 'auto' : (+v as Rotation)
             setRotation(r)
-            if (originalImg) void run(null, r)
+            if (originalImg && phase !== 'cropping') void run(r, cropRect)
           }} style={{ marginLeft: 4, padding: 4, fontSize: 16 }}>
             <option value="auto">자동</option>
             <option value={0}>0°</option>
@@ -288,11 +314,20 @@ export function OcrTestScreen({ onClose }: { onClose: (savedId?: string) => void
           <input type="file" accept="image/*" hidden disabled={disabled}
             onChange={e => {
               const f = e.target.files?.[0]; e.target.value = ''
-              if (f) void run(f, rotation)
+              if (f) void pick(f)
             }} />
         </label>
-        {originalImg && <button disabled={disabled} onClick={() => void run(null, rotation)}>다시 파싱</button>}
+        {originalImg && phase !== 'cropping' && <>
+          <button disabled={disabled} onClick={() => void run(rotation, cropRect)}>다시 파싱</button>
+          <button disabled={disabled} onClick={() => { resetResults(); setPhase('cropping') }}>다시 자르기</button>
+        </>}
       </div>
+
+      {phase === 'cropping' && originalImg && (
+        <CropStep image={originalImg} initial={cropRect}
+          onCancel={() => { setOriginalImg(null); setPhase('idle') }}
+          onConfirm={rect => { setCropRect(rect); void run(rotation, rect) }} />
+      )}
 
       {exifNote && <p style={{ color: '#555', fontSize: 13, margin: '4px 0' }}>{exifNote}</p>}
       {progress && <p style={{ color: '#2C6BED' }}>{progress}</p>}
