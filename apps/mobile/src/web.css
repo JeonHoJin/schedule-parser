@@ -18,3 +18,7 @@ button:focus-visible, select:focus-visible, .import-button:focus-within { outlin
 .local-empty, .local-error, .local-notice { width: 100%; max-width: 520px; margin: 0 auto; padding: 16px 20px; font-size: 14px; overflow-wrap: anywhere; }
 .local-error { color: #a12727; }
 .local-notice { color: #176953; }
+.server-status { width: 100%; max-width: 520px; margin: 0 auto; padding: 0 20px 12px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #5b6570; }
+.server-status button { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.server-ok { color: #176953; }
+.server-failed { color: #a12727; }
