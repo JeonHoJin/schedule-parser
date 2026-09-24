@@ -153,3 +153,12 @@ button.danger { color: #a12727; border-color: #e3b9b9; }
 .review-item.excluded { grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; background: #f4f4f6; }
 .excluded-text { font-size: 13px; color: #8a8a91; text-decoration: line-through; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .restore-button { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+
+/* 좌우 스와이프: 근무표 넘기기, 날짜 넘기기 */
+.swipe-area { display: flex; flex-direction: column; flex: 1; min-height: 0; touch-action: pan-y; }
+.day-body { touch-action: pan-y; }
+.slide-left { animation: slide-from-right .22s ease-out; }
+.slide-right { animation: slide-from-left .22s ease-out; }
+@keyframes slide-from-right { from { transform: translateX(36px); opacity: .35; } }
+@keyframes slide-from-left { from { transform: translateX(-36px); opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .slide-left, .slide-right { animation: none; } }

@@ -8,6 +8,7 @@ import { connectInBackground } from './src/server'
 import { displayName, RosterContext, type LocalRoster } from './src/data'
 import { listRosters, removeRoster, saveRoster } from './src/local-storage'
 import { editCell } from './src/roster-edit'
+import { useSwipe, type SwipeDirection } from './src/swipe'
 import './src/web.css'
 
 export default function App() {
@@ -18,7 +19,18 @@ export default function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [adding, setAdding] = useState(false)
+  const [slide, setSlide] = useState<SwipeDirection | null>(null)
   const current = items.find(i => i.roster.id === selected)
+
+  // 목록은 최근 달이 먼저다. 왼쪽으로 밀면 다음 달, 오른쪽으로 밀면 이전 달.
+  const swipe = useSwipe(dir => {
+    const at = items.findIndex(i => i.roster.id === selected)
+    const next = items[dir === 'left' ? at - 1 : at + 1]
+    if (at < 0 || !next) return
+    setSlide(dir)
+    setSelected(next.roster.id)
+    setDate(null)
+  })
 
   async function refresh() {
     const next = await listRosters()
@@ -56,6 +68,7 @@ export default function App() {
 
   function setMe(myNurseId: string) {
     if (!current || !myNurseId) return
+    setSlide(null)
     void run(async () => {
       await saveRoster({ ...current, settings: { ...current.settings, myNurseId } })
       await refresh()
@@ -94,7 +107,7 @@ export default function App() {
       </header>
       <section className="local-controls" aria-label="저장된 근무표">
         {items.length > 0 && <label>근무표
-          <select aria-label="근무표" value={selected} disabled={busy} onChange={e => { setSelected(e.target.value); setDate(null) }}>
+          <select aria-label="근무표" value={selected} disabled={busy} onChange={e => { setSlide(null); setSelected(e.target.value); setDate(null) }}>
             {items.map(i => <option key={i.roster.id} value={i.roster.id}>
               {i.roster.year}년 {i.roster.month}월 {i.roster.ward}
             </option>)}
@@ -118,7 +131,9 @@ export default function App() {
       {current && !me && <PickMe roster={current} disabled={busy} onPick={setMe} />}
       {current && me && <RosterContext.Provider value={current}>
         <View style={{ flex: 1 }} key={current.roster.id + me.id}>
-          <CalendarScreen onPick={setDate} />
+          <div className={`swipe-area${slide ? ` slide-${slide}` : ''}`} {...swipe}>
+            <CalendarScreen onPick={setDate} />
+          </div>
           {date && <DayDialog date={date} onDate={setDate} onClose={() => setDate(null)} onEdit={edit} />}
         </View>
       </RosterContext.Provider>}

@@ -12,6 +12,7 @@ import { ShiftBadge, rawWorthShowing } from '../components/ShiftBadge'
 import { color, shiftColor, space } from '../theme'
 import { displayName, useRoster } from '../data'
 import { MAX_OTHER_LABEL } from '../roster-edit'
+import { useSwipe, type SwipeDirection } from '../swipe'
 
 const ORDER: ShiftKind[] = ['D', 'E', 'N', 'OFF', 'OTHER', 'EMPTY']
 const CHOICES: Array<{ kind: ShiftKind; label: string }> = [
@@ -67,6 +68,7 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
   const [otherOpen, setOtherOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [slide, setSlide] = useState<SwipeDirection | null>(null)
   const sheet = useRef<HTMLDivElement>(null)
   const pushed = useRef(false)
   const closeRef = useRef(onClose)
@@ -97,6 +99,14 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
 
   const days = monthOf(index, me.id).map(c => c.date)
   const prev = addDays(date, -1), next = addDays(date, 1)
+  function go(dir: SwipeDirection) {
+    const to = dir === 'left' ? next : prev
+    if (!days.includes(to)) return
+    setSlide(dir)
+    onDate(to)
+  }
+  // 왼쪽으로 밀면 다음날, 오른쪽으로 밀면 전날
+  const swipe = useSwipe(go)
   const mine = index.cell(me.id, date)
   const chain = handover(index, me.id, date)
   const day = Number(date.slice(-2))
@@ -134,12 +144,13 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
       <div className="day-sheet" role="dialog" aria-modal="true" aria-label={`${title} 근무`}
         tabIndex={-1} ref={sheet} onClick={e => e.stopPropagation()}>
         <div className="day-head">
-          <button type="button" className="day-nav" aria-label="전날" disabled={!days.includes(prev)} onClick={() => onDate(prev)}>‹</button>
+          <button type="button" className="day-nav" aria-label="전날" disabled={!days.includes(prev)} onClick={() => go('right')}>‹</button>
           <h2>{title}</h2>
-          <button type="button" className="day-nav" aria-label="다음날" disabled={!days.includes(next)} onClick={() => onDate(next)}>›</button>
+          <button type="button" className="day-nav" aria-label="다음날" disabled={!days.includes(next)} onClick={() => go('left')}>›</button>
           <button type="button" className="day-close" aria-label="닫기" onClick={close}>✕</button>
         </div>
-        <div className="day-body">
+        <div className="day-body" {...swipe}>
+          <div key={date} className={slide ? `slide-${slide}` : undefined}>
           <div className="my-shift">
             <span className="my-label">내 근무</span>
             <ShiftBadge kind={kind} size="lg" />
@@ -253,6 +264,7 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
               })}
             </View>
           </>}
+          </div>
         </div>
       </div>
     </div>
