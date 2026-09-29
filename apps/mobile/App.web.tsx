@@ -6,7 +6,9 @@ import { DayDialog, type EditCell } from './src/screens/DayDialog'
 import { OcrTestScreen } from './src/screens/OcrTestScreen'
 import { connectInBackground, ServerError } from './src/server'
 import { displayName, RosterContext, type LocalRoster } from './src/data'
-import { readCache } from './src/local-storage'
+import { readCache, sortRosters } from './src/local-storage'
+import { received, SELECT_KEY, type Received } from './src/received'
+import { AddSharedDialog } from './src/components/AddSharedDialog'
 import { store, upsert } from './src/store'
 import { editCell } from './src/roster-edit'
 import { useSwipe, type SwipeDirection } from './src/swipe'
@@ -28,6 +30,12 @@ export default function Root() {
     return () => removeEventListener('hashchange', onHash)
   }, [])
   return token ? <SharedApp key={token} token={token} /> : <App />
+}
+
+const isShared = (id: string) => id.startsWith('received-')
+const until = (iso: string) => {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`
 }
 
 const PASSKEY_KNOWN = 'schedule-parser:passkey'
@@ -65,24 +73,35 @@ function App() {
   const [account, setAccount] = useState(false)
   const [passkeyCount, setPasskeyCount] = useState<number | null>(null)
   const [nudgeHidden, setNudgeHidden] = useState(nudgeDismissed)
+  const [recs, setRecs] = useState<Received[]>([])
+  const [recsLoaded, setRecsLoaded] = useState(false)
+  const [addingShared, setAddingShared] = useState(false)
   const onlineRef = useRef(true)
-  const current = items.find(i => i.roster.id === selected)
+  // 내 근무표와 공유받은 근무표를 한 목록으로(최근 달 먼저, 같은 달이면 내 것 먼저).
+  const entries = sortRosters([...items, ...recs.map(r => r.data)])
+  const current = entries.find(i => i.roster.id === selected)
+  const rec = recs.find(r => r.data.roster.id === selected)
   const canWrite = online && !busy
 
-  // 목록은 최근 달이 먼저다. 왼쪽으로 밀면 다음 달, 오른쪽으로 밀면 이전 달.
+  // 왼쪽으로 밀면 다음 달, 오른쪽으로 밀면 이전 달.
   const swipe = useSwipe(dir => {
-    const at = items.findIndex(i => i.roster.id === selected)
-    const next = items[dir === 'left' ? at - 1 : at + 1]
+    const at = entries.findIndex(i => i.roster.id === selected)
+    const next = entries[dir === 'left' ? at - 1 : at + 1]
     if (at < 0 || !next) return
     setSlide(dir)
     setSelected(next.roster.id)
     setDate(null)
   })
 
-  function show(next: LocalRoster[]) {
-    setItems(next)
-    setSelected(sel => next.some(i => i.roster.id === sel) ? sel : next[0]?.roster.id ?? '')
-  }
+  // 고른 근무표가 사라지면(삭제·계정 변경) 목록의 첫 근무표로. 공유받은 목록을 읽기 전에는
+  // 기다린다(방금 추가한 공유 근무표를 고른 상태일 수 있다).
+  const ids = entries.map(e => e.roster.id).join(',')
+  useEffect(() => {
+    if (!recsLoaded) return
+    if (!entries.some(e => e.roster.id === selected)) setSelected(entries[0]?.roster.id ?? '')
+  }, [ids, recsLoaded])
+
+  const show = (next: LocalRoster[]) => setItems(next)
 
   /** 서버와 맞춘다. 닿지 못하면 기기의 사본을 읽기 전용으로 보여 준다. */
   async function sync() {
@@ -92,6 +111,8 @@ function App() {
       show(result.items)
       setOnline(result.online)
       onlineRef.current = result.online
+      // 공유받은 근무표는 보낸 사람 쪽 수정을 받아 온다(실패해도 사본은 그대로).
+      received.refresh(result.items).then(setRecs).catch(() => {})
     } catch (e) {
       setError(friendly(e))
     } finally { setBusy(false) }
@@ -100,6 +121,12 @@ function App() {
   useEffect(() => {
     // 사본을 먼저 보여 주고(빠르게), 서버와 맞춘 결과로 바꾼다.
     readCache().then(cached => { if (cached.length) show(cached) }).catch(() => {})
+    received.list().then(setRecs).catch(() => {}).finally(() => setRecsLoaded(true))
+    // 공유 링크 화면에서 "내 목록에 추가"로 넘어왔으면 그 근무표를 연다.
+    try {
+      const pick = sessionStorage.getItem(SELECT_KEY)
+      if (pick) { sessionStorage.removeItem(SELECT_KEY); setSelected(pick) }
+    } catch { /* 무시 */ }
     void sync()
     const retry = () => { if (!onlineRef.current) void sync() }
     const onVisible = () => { if (!document.hidden) retry() }
@@ -157,6 +184,14 @@ function App() {
   function setMe(myNurseId: string) {
     if (!current || !myNurseId) return
     setSlide(null)
+    if (rec) {
+      // 공유받은 근무표의 "내 이름"은 이 기기에만 적어 둔다.
+      void received.setMe(rec.token, myNurseId).then(next => {
+        if (next) setRecs(prev => prev.map(r => r.token === next.token ? next : r))
+      })
+      setDate(null)
+      return
+    }
     void run(async () => {
       await persist({ ...current, settings: { ...current.settings, myNurseId } })
       setDate(null)
@@ -177,8 +212,14 @@ function App() {
       <header className="local-header">
         <h1>근무표</h1>
         <div className="header-actions">
-          {current && <button type="button" disabled={!canWrite} onClick={() => { connectInBackground(); setSharing(true) }}>공유</button>}
-          {current && <button type="button" className="danger" disabled={!canWrite} onClick={() => {
+          {current && !rec && <button type="button" disabled={!canWrite} onClick={() => { connectInBackground(); setSharing(true) }}>공유</button>}
+          {rec && <button type="button" className="danger" onClick={() => {
+            if (window.confirm('공유받은 근무표를 이 목록에서 뺄까요? 다시 보려면 링크를 다시 추가하면 돼요.')) {
+              void received.remove(rec.token).then(() => setRecs(prev => prev.filter(r => r.token !== rec.token)))
+              setDate(null)
+            }
+          }}>목록에서 빼기</button>}
+          {current && !rec && <button type="button" className="danger" disabled={!canWrite} onClick={() => {
             const label = `${current.roster.year}년 ${current.roster.month}월`
             if (window.confirm(`${label} 근무표를 삭제할까요? 삭제하면 되돌릴 수 없습니다.`)) {
               void run(async () => {
@@ -208,42 +249,61 @@ function App() {
         </div>
       )}
       <section className="local-controls" aria-label="저장된 근무표">
-        {items.length > 0 && <label>근무표
+        {entries.length > 0 && <label>근무표
           <select aria-label="근무표" value={selected} onChange={e => { setSlide(null); setSelected(e.target.value); setDate(null) }}>
-            {items.map(i => <option key={i.roster.id} value={i.roster.id}>
-              {i.roster.year}년 {i.roster.month}월 {i.roster.ward}
+            {entries.map(i => <option key={i.roster.id} value={i.roster.id}>
+              {i.roster.year}년 {i.roster.month}월 {i.roster.ward}{isShared(i.roster.id) ? ' (공유받음)' : ''}
             </option>)}
           </select>
         </label>}
         {current && me && <label>내 이름
-          <select aria-label="내 이름" value={me.id} disabled={!canWrite} onChange={e => setMe(e.target.value)}>
+          <select aria-label="내 이름" value={me.id} disabled={!rec && !canWrite} onChange={e => setMe(e.target.value)}>
             {current.roster.nurses.map(n => <option key={n.id} value={n.id}>{displayName(n)}</option>)}
           </select>
         </label>}
       </section>
+      {rec && (
+        <div className={`received-banner${rec.gone ? ' gone' : ''}`} role="status">
+          {rec.gone
+            ? '공유가 끝난 근무표예요. 마지막으로 받은 내용을 보여 드려요. 계속 보려면 보낸 사람에게 새 링크를 받아 추가해 주세요.'
+            : `공유받은 근무표 · 읽기 전용 · ${until(rec.expiresAt)}까지`}
+        </div>
+      )}
       {error && <p className="local-error" role="alert">{error}</p>}
       {busy && !current && <p className="local-empty" role="status">불러오는 중...</p>}
       {!busy && !current && online && (
         <div className="empty-state">
           <p className="empty-title">저장된 근무표가 없습니다.</p>
           <p className="empty-body">위의 "근무표 사진 추가"로 근무표를 찍어 올리면 내 근무와 인수인계 상대를 달력으로 볼 수 있어요.</p>
-          <p className="empty-body">다른 기기에서 쓰던 근무표가 있나요?</p>
-          <button type="button" onClick={() => setAccount(true)}>패스키로 불러오기</button>
+          <p className="empty-body">다른 기기에서 쓰던 근무표가 있거나, 공유 링크를 받았나요?</p>
+          <div className="empty-actions">
+            <button type="button" onClick={() => setAccount(true)}>패스키로 불러오기</button>
+            <button type="button" onClick={() => setAddingShared(true)}>공유받은 근무표 추가</button>
+          </div>
         </div>
       )}
-      {current && !me && <PickMe roster={current} disabled={!canWrite} onPick={setMe} />}
+      {current && !me && <PickMe roster={current} disabled={!rec && !canWrite} onPick={setMe} />}
       {current && me && <RosterContext.Provider value={current}>
         <View style={{ flex: 1 }} key={current.roster.id + me.id}>
           <div className={`swipe-area${slide ? ` slide-${slide}` : ''}`} {...swipe}>
             <CalendarScreen onPick={setDate} />
           </div>
-          {date && <DayDialog date={date} onDate={setDate} onClose={() => setDate(null)} onEdit={online ? edit : undefined} />}
+          {date && <DayDialog date={date} onDate={setDate} onClose={() => setDate(null)} onEdit={online && !rec ? edit : undefined} />}
         </View>
       </RosterContext.Provider>}
-      {sharing && current && <ShareDialog roster={current} onClose={() => setSharing(false)} />}
+      {sharing && current && !rec && <ShareDialog roster={current} onClose={() => setSharing(false)} />}
       <footer className="app-footer">
+        <button type="button" className="link-button" onClick={() => setAddingShared(true)}>공유받은 근무표 추가</button>
+        <span className="footer-dot" aria-hidden="true">·</span>
         <button type="button" className="link-button" onClick={() => setAccount(true)}>계정·패스키</button>
       </footer>
+      {addingShared && <AddSharedDialog own={items} onClose={() => setAddingShared(false)} onAdded={r => {
+        setRecs(prev => [...prev.filter(x => x.token !== r.token), r])
+        setSelected(r.data.roster.id)
+        setSlide(null)
+        setDate(null)
+        setAddingShared(false)
+      }} />}
       {account && <AccountDialog online={online} rosterCount={items.length} onSwitched={switched}
         onRegistered={count => { setPasskeyCount(count); rememberPasskey() }} onClose={() => setAccount(false)} />}
     </main>

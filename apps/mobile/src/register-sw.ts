@@ -50,6 +50,14 @@ function ensureManifestLink() {
   link.href = new URL('manifest.webmanifest', location.href).toString()
   document.head.appendChild(link)
 
+  // 아이폰 홈 화면 아이콘(SVG 는 쓰지 않고, 투명한 모서리는 검게 칠해 버린다)
+  if (!document.querySelector('link[rel="apple-touch-icon"]')) {
+    const touch = document.createElement('link')
+    touch.rel = 'apple-touch-icon'
+    touch.href = new URL('apple-touch-icon.png', location.href).toString()
+    document.head.appendChild(touch)
+  }
+
   if (!document.querySelector('link[rel="icon"]')) {
     const icon = document.createElement('link')
     icon.rel = 'icon'

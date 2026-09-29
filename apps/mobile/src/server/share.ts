@@ -29,6 +29,14 @@ export function tokenFromHash(hash: string): string | null {
   return m && TOKEN.test(m[1]) ? m[1] : null
 }
 
+/** 붙여 넣은 글에서 공유 토큰을 찾는다: 공유 링크 전체, 또는 토큰만. 앞뒤 안내 문구가 붙어 있어도 된다. */
+export function tokenFromText(text: string): string | null {
+  const inLink = text.match(/#share=([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/)
+  if (inLink) return inLink[1]
+  const bare = text.trim()
+  return TOKEN.test(bare) ? bare : null
+}
+
 export function shareUrl(token: string, page: string = location.href): string {
   const base = new URL('.', page)
   return `${base.origin}${base.pathname}#share=${token}`
