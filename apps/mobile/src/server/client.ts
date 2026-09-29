@@ -58,6 +58,11 @@ export class ServerClient {
     return this.session?.userId
   }
 
+  /** 이 기기가 한 번이라도 로그인해서 기기 키를 갖고 있는지. 키를 만들지 않는다. */
+  async hasIdentity(): Promise<boolean> {
+    return Boolean(await this.opts.store.get())
+  }
+
   private async deviceKeys(): Promise<CryptoKeyPair> {
     const existing = await this.opts.store.get()
     if (existing) return existing

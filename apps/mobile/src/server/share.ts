@@ -66,13 +66,8 @@ async function ok(res: Response): Promise<Response> {
   return res
 }
 
-/** 서버에 최신 내용을 먼저 올린 뒤 새 링크를 만든다(예전 링크는 막힌다). */
+/** 새 링크를 만든다(예전 링크는 막힌다). 근무표는 이미 서버에 있다. */
 export async function createShare(data: LocalRoster): Promise<ShareLink> {
-  await ok(await server.op('roster-save', {
-    method: 'PUT',
-    body: JSON.stringify({ version: 1, ...data }),
-    headers: { 'content-type': 'application/json' },
-  }))
   const res = await ok(await server.op('roster-share', {
     method: 'POST',
     body: JSON.stringify({ id: data.roster.id }),

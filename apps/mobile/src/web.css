@@ -176,3 +176,8 @@ button.danger { color: #a12727; border-color: #e3b9b9; }
 .share-hint { margin: 0; font-size: 12px; color: #8a8a91; line-height: 1.5; }
 .share-error { padding: 0; }
 .shared-badge { font-size: 12px; font-weight: 600; color: #5b6570; background: #eceef1; border-radius: 999px; padding: 4px 10px; }
+
+/* 서버에 닿지 못할 때: 사본을 읽기 전용으로 보여 준다 */
+.offline-banner { width: calc(100% - 40px); max-width: 480px; margin: 0 auto 12px; padding: 10px 12px; border-radius: 10px; background: #fff6e5; border: 1px solid #f3dfb6; color: #8a5a00; font-size: 13px; line-height: 1.5; display: flex; align-items: center; gap: 10px; }
+.offline-banner span { flex: 1; }
+.offline-banner button { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; font-size: 13px; }

@@ -8,7 +8,7 @@ import { readExifDate } from '../experimental/exif'
 import { fullParse, type FullParseResult } from '../experimental/full-parse'
 import { rowStrips, titleStrips, workToCanvas, type RowStrips } from '../experimental/name-strip'
 import { guessMonth, looksLikeEmpno, looksLikeName, readRows, readSheet, type RowReading } from '../server/ocr'
-import { listRosters, saveRoster } from '../local-storage'
+import { ServerError } from '../server'
 import type { LocalRoster } from '../data'
 
 type Phase = 'idle' | 'decoding' | 'cropping' | 'parsing' | 'ocring' | 'saving' | 'done' | 'error'
@@ -112,7 +112,13 @@ function diagnose(parsed: FullParseResult, strips: RowStrips[]): Diagnostic {
 /** 파싱은 동기 작업이라, 진행 문구가 먼저 그려지도록 한 프레임 양보한다. */
 const frame = () => new Promise(r => setTimeout(r, 30))
 
-export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string }) => void }) {
+export function OcrTestScreen({ existing, onSave, onClose }: {
+  /** 지금 있는 근무표들(같은 달 덮어쓰기 확인, "내 이름" 이어받기) */
+  existing: LocalRoster[]
+  /** 서버에 저장한다. 실패하면 던지고, 이 화면은 그대로 남아 다시 저장할 수 있다. */
+  onSave: (data: LocalRoster) => Promise<void>
+  onClose: () => void
+}) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
@@ -274,8 +280,7 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string }) =
     setPhase('saving')
     setProgress('저장 중…')
     try {
-      const saved = await listRosters()
-      if (saved.some(i => i.roster.id === roster.id)
+      if (existing.some(i => i.roster.id === roster.id)
         && !window.confirm(`${roster.year}년 ${roster.month}월 근무표가 이미 있습니다. 덮어쓸까요?`)) {
         setPhase('done'); setProgress('')
         return
@@ -303,17 +308,17 @@ export function OcrTestScreen({ onClose }: { onClose: (saved?: { id: string }) =
         : keptCells
 
       const next = { ...roster, nurses: patchedNurses, cells }
-      const myNurseId = carryMyNurse(next, saved)
+      const myNurseId = carryMyNurse(next, existing)
       const local: LocalRoster = {
         roster: next,
         settings: { myNurseId, reviewThreshold: 0.8 },
         review: { empnos: [], cells: [] },
       }
-      await saveRoster(local)
-      onClose({ id: roster.id })
+      await onSave(local)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '저장 실패')
-      setPhase('error')
+      const offline = e instanceof ServerError || e instanceof TypeError
+      setError(offline ? '서버에 저장하지 못했어요. 연결을 확인하고 다시 저장해 주세요.' : e instanceof Error ? e.message : '저장 실패')
+      setPhase('done')
     } finally { setProgress('') }
   }
 

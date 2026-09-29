@@ -1,5 +1,5 @@
 /**
- * 저장된 근무표를 고치는 순수 함수들. 화면은 결과를 saveRoster 로 저장만 한다.
+ * 근무표를 고치는 순수 함수들. 화면은 결과를 서버에 저장한다(src/store.ts).
  */
 import type { IsoDate, Nurse, Roster, ShiftKind } from '@sp/domain'
 import type { LocalRoster } from './data'

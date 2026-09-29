@@ -1,6 +1,5 @@
 import type { LocalRoster } from './data'
 import { daysInMonth, isoDate, type ShiftKind } from '@sp/domain'
-import { backup } from './server/rosters'
 
 const invalid = () => new Error('근무표 데이터가 올바르지 않습니다.')
 const object = (v: unknown): Record<string, unknown> => {
@@ -108,19 +107,23 @@ async function transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjec
   } finally { db.close() }
 }
 
-export async function listRosters(): Promise<LocalRoster[]> {
+/**
+ * 기기의 근무표는 서버 근무표의 사본(오프라인에서 보기용)이다. 근무표를 만들고 고치는 일은
+ * 서버에서 하고(src/store.ts), 성공한 결과만 여기에 적는다.
+ */
+export const sortRosters = (items: LocalRoster[]) =>
+  [...items].sort((a, b) => b.roster.year - a.roster.year || b.roster.month - a.roster.month)
+
+export async function readCache(): Promise<LocalRoster[]> {
   const data = await transaction('readonly', s => s.getAll())
-  return data.map(parseBackup).sort((a, b) => b.roster.year - a.roster.year || b.roster.month - a.roster.month)
+  return sortRosters(data.map(parseBackup))
 }
 
-/** 기기에 저장하고, 서버 백업은 기다리지 않고 뒤에서 보낸다. */
-export async function saveRoster(data: LocalRoster): Promise<void> {
+export async function writeCache(data: LocalRoster): Promise<void> {
   const clean = parseBackup(data)
   await transaction('readwrite', s => s.put(clean))
-  void backup.save(clean)
 }
 
-export async function removeRoster(id: string): Promise<void> {
+export async function dropCache(id: string): Promise<void> {
   await transaction('readwrite', s => s.delete(id))
-  void backup.remove(id)
 }
