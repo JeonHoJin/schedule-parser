@@ -59,7 +59,8 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
   date: IsoDate
   onDate: (date: IsoDate) => void
   onClose: () => void
-  onEdit: EditCell
+  /** 없으면 읽기 전용(공유 받은 근무표) */
+  onEdit?: EditCell
 }) {
   const { index, me } = useRoster()
   const [expanded, setExpanded] = useState(false)
@@ -132,7 +133,7 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
     setSaving(true)
     setError('')
     try {
-      await onEdit(nurseId, date, k, label)
+      await onEdit?.(nurseId, date, k, label)
       setEditing(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '저장하지 못했습니다.')
@@ -202,20 +203,20 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
 
           <Pressable onPress={() => setExpanded(v => !v)} style={styles.toggle} accessibilityRole="button">
             <Text style={styles.toggleText}>
-              {expanded ? '병동 전체 접기' : `병동 전체 보기·수정 (근무 ${working}명)`}
+              {expanded ? '병동 전체 접기' : `병동 전체 보기${onEdit ? '·수정' : ''} (근무 ${working}명)`}
             </Text>
           </Pressable>
 
           {expanded && <>
-            <Text style={styles.editHint}>이름을 누르면 그 사람의 이날 근무를 바꿀 수 있어요. 바꾼 근무는 이 기기에 바로 저장돼요.</Text>
+            {onEdit && <Text style={styles.editHint}>이름을 누르면 그 사람의 이날 근무를 바꿀 수 있어요. 바꾼 근무는 이 기기에 바로 저장돼요.</Text>}
             {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
             <View style={styles.allBox}>
               {all.map(({ cell, nurse }) => {
                 const open = editing === nurse.id
                 return (
                   <View key={nurse.id} style={[styles.rowWrap, open && styles.rowOpen]}>
-                    <Pressable style={styles.row} accessibilityRole="button"
-                      accessibilityLabel={`${displayName(nurse)} 근무 바꾸기`}
+                    <Pressable style={styles.row} accessibilityRole={onEdit ? 'button' : undefined} disabled={!onEdit}
+                      accessibilityLabel={onEdit ? `${displayName(nurse)} 근무 바꾸기` : undefined}
                       onPress={() => {
                         setEditing(open ? null : nurse.id)
                         setOtherOpen(cell.kind === 'OTHER')
@@ -228,7 +229,7 @@ export function DayDialog({ date, onDate, onClose, onEdit }: {
                       <Text style={[styles.rowName, nurse.id === me.id && styles.rowMe]}>{displayName(nurse)}</Text>
                       {rawWorthShowing(cell.raw, cell.kind) && <Text style={styles.rowRaw}>{cell.raw}</Text>}
                       {cell.edited && <Text style={styles.edited}>수정됨</Text>}
-                      <Text style={styles.chevron}>{open ? '닫기' : '변경'}</Text>
+                      {onEdit && <Text style={styles.chevron}>{open ? '닫기' : '변경'}</Text>}
                     </Pressable>
                     {open && (
                       <View style={styles.picker}>

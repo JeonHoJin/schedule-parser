@@ -9,9 +9,24 @@ import { displayName, RosterContext, type LocalRoster } from './src/data'
 import { listRosters, removeRoster, saveRoster } from './src/local-storage'
 import { editCell } from './src/roster-edit'
 import { useSwipe, type SwipeDirection } from './src/swipe'
+import { PickMe } from './src/components/PickMe'
+import { ShareDialog } from './src/components/ShareDialog'
+import { SharedApp } from './src/screens/SharedApp'
+import { forget, tokenFromHash } from './src/server/share'
 import './src/web.css'
 
-export default function App() {
+/** `#share=<토큰>` 으로 열면 공유된 근무표를, 아니면 내 근무표를 보여 준다. */
+export default function Root() {
+  const [token, setToken] = useState(() => tokenFromHash(location.hash))
+  useEffect(() => {
+    const onHash = () => setToken(tokenFromHash(location.hash))
+    addEventListener('hashchange', onHash)
+    return () => removeEventListener('hashchange', onHash)
+  }, [])
+  return token ? <SharedApp key={token} token={token} /> : <App />
+}
+
+function App() {
   const [items, setItems] = useState<LocalRoster[]>([])
   const [selected, setSelected] = useState('')
   const [date, setDate] = useState<IsoDate | null>(null)
@@ -20,6 +35,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [adding, setAdding] = useState(false)
   const [slide, setSlide] = useState<SwipeDirection | null>(null)
+  const [sharing, setSharing] = useState(false)
   const current = items.find(i => i.roster.id === selected)
 
   // 목록은 최근 달이 먼저다. 왼쪽으로 밀면 다음 달, 오른쪽으로 밀면 이전 달.
@@ -90,11 +106,13 @@ export default function App() {
       <header className="local-header">
         <h1>근무표</h1>
         <div className="header-actions">
+          {current && <button type="button" disabled={busy} onClick={() => { connectInBackground(); setSharing(true) }}>공유</button>}
           {current && <button type="button" className="danger" disabled={busy} onClick={() => {
             const label = `${current.roster.year}년 ${current.roster.month}월`
             if (window.confirm(`${label} 근무표를 삭제할까요? 삭제하면 되돌릴 수 없습니다.`)) {
               void run(async () => {
                 await removeRoster(current.roster.id)
+                forget(current.roster.id)
                 const next = await refresh()
                 setSelected(next[0]?.roster.id ?? '')
                 setDate(null)
@@ -137,34 +155,7 @@ export default function App() {
           {date && <DayDialog date={date} onDate={setDate} onClose={() => setDate(null)} onEdit={edit} />}
         </View>
       </RosterContext.Provider>}
+      {sharing && current && <ShareDialog roster={current} onClose={() => setSharing(false)} />}
     </main>
-  )
-}
-
-/** "내 이름"이 없으면 달력 대신 이 화면에서 먼저 고르게 한다. */
-function PickMe({ roster, disabled, onPick }: { roster: LocalRoster; disabled: boolean; onPick: (id: string) => void }) {
-  const [query, setQuery] = useState('')
-  const nurses = [...roster.roster.nurses].sort((a, b) => a.order - b.order)
-  const q = query.trim()
-  const shown = q ? nurses.filter(n => displayName(n).includes(q) || n.empNo.includes(q)) : nurses
-  return (
-    <section className="pick-me" aria-labelledby="pick-me-title">
-      <h2 id="pick-me-title">이 근무표에서 내 이름을 골라 주세요</h2>
-      <p>{roster.roster.year}년 {roster.roster.month}월 근무표입니다. 고른 사람의 근무와 인수인계 상대를 달력에 보여 드려요. 나중에 위의 "내 이름"에서 바꿀 수 있어요.</p>
-      {nurses.length > 12 && (
-        <input type="search" className="pick-search" placeholder="이름 또는 사번으로 찾기" aria-label="이름 또는 사번으로 찾기"
-          value={query} onChange={e => setQuery(e.target.value)} />
-      )}
-      <div className="pick-grid">
-        {shown.map(n => (
-          <button key={n.id} type="button" disabled={disabled} onClick={() => onPick(n.id)}>
-            {n.name?.trim()
-              ? <><span className="pick-name">{n.name.trim()}</span>{n.empNo && <span className="pick-empno">{n.empNo}</span>}</>
-              : <><span className="pick-name">{n.empNo || '(미확인)'}</span><span className="pick-empno">사번 · 이름 없음</span></>}
-          </button>
-        ))}
-        {shown.length === 0 && <p className="pick-none">찾는 사람이 없습니다.</p>}
-      </div>
-    </section>
   )
 }
