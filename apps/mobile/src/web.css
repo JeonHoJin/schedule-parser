@@ -181,3 +181,14 @@ button.danger { color: #a12727; border-color: #e3b9b9; }
 .offline-banner { width: calc(100% - 40px); max-width: 480px; margin: 0 auto 12px; padding: 10px 12px; border-radius: 10px; background: #fff6e5; border: 1px solid #f3dfb6; color: #8a5a00; font-size: 13px; line-height: 1.5; display: flex; align-items: center; gap: 10px; }
 .offline-banner span { flex: 1; }
 .offline-banner button { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; font-size: 13px; }
+
+/* 계정·패스키 */
+.app-footer { width: 100%; max-width: 520px; margin: 0 auto; padding: 6px 20px calc(10px + env(safe-area-inset-bottom)); text-align: center; }
+.app-footer .link-button { font-size: 12px; color: #5b6570; }
+.passkey-nudge { width: calc(100% - 40px); max-width: 480px; margin: 0 auto 12px; padding: 10px 12px; border-radius: 10px; background: #eef7f3; border: 1px solid #cfe6db; color: #1f4f3f; font-size: 13px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.passkey-nudge span { flex: 1 1 200px; }
+.passkey-nudge button { min-height: 34px; padding: 5px 12px; font-size: 13px; }
+.account-block { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid #e6e6ea; }
+.account-block:last-of-type { border-bottom: 0; }
+.account-block h3 { margin: 0; font-size: 15px; }
+.empty-state button { margin-top: 4px; }

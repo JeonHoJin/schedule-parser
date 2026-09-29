@@ -35,7 +35,15 @@ export interface ClientOptions {
 const ECDSA = { name: 'ECDSA', namedCurve: 'P-256' } as const
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
 
-export function base64url(bytes: ArrayBuffer): string {
+export function fromBase64url(text: string): Uint8Array {
+  const b64 = text.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((text.length + 3) % 4)
+  const raw = atob(b64)
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
+}
+
+export function base64url(bytes: ArrayBuffer | Uint8Array): string {
   let s = ''
   for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b)
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -118,7 +126,11 @@ export class ServerClient {
     method?: string; body?: BodyInit; version?: string; headers?: Record<string, string>; query?: Record<string, string>
   } = {}): Promise<Response> {
     const query = init.query ? `?${new URLSearchParams(init.query)}` : ''
-    const path = `/op/${name}${init.version ? `/${init.version}` : ''}${query}`
+    return this.request(`/op/${name}${init.version ? `/${init.version}` : ''}${query}`, init)
+  }
+
+  /** 로그인한 사용자로 서버 경로를 부른다(`/auth/passkey/…` 등). 401 이면 한 번 다시 로그인한다. */
+  async request(path: string, init: { method?: string; body?: BodyInit; headers?: Record<string, string> } = {}): Promise<Response> {
     const call = async () => this.fetch(this.opts.base + path, {
       method: init.method ?? 'POST',
       body: init.body,
@@ -130,5 +142,34 @@ export class ServerClient {
       res = await call()
     }
     return res
+  }
+
+  /** 로그인 없이 서버 경로에 JSON 을 보낸다(패스키 로그인). */
+  async postPublic<T>(path: string, body?: unknown): Promise<T> {
+    return this.postJson<T>(path, body)
+  }
+
+  /**
+   * 다른 곳(패스키)으로 로그인한 계정을 이 기기의 계정으로 삼는다. 새 기기 키를 만들어 그 계정에
+   * 연결한 뒤에야 저장해 두므로, 연결에 실패하면 이 기기의 원래 계정이 그대로 남는다.
+   */
+  async adoptAccount(login: { access_token: string; expires_in: number; user_id: string }): Promise<void> {
+    const keys = await this.subtle.generateKey(ECDSA, false, ['sign', 'verify']) as CryptoKeyPair
+    const { challenge } = await this.postJson<{ challenge: string }>('/auth/challenge')
+    const signature = await this.subtle.sign(SIGN, keys.privateKey, new TextEncoder().encode(`mlhops-auth-v1:${challenge}`))
+    const jwk = await this.subtle.exportKey('jwk', keys.publicKey)
+    const res = await this.fetch(this.opts.base + '/auth/link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${login.access_token}` },
+      body: JSON.stringify({
+        public_key: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+        challenge,
+        signature: base64url(signature),
+      }),
+    })
+    if (res.status !== 201 && res.status !== 200) throw new ServerError(res.status, `HTTP ${res.status}`)
+    await this.opts.store.put(keys)
+    const margin = Math.min(60, login.expires_in / 2)
+    this.session = { token: login.access_token, userId: login.user_id, refreshAt: this.now() + (login.expires_in - margin) * 1000 }
   }
 }

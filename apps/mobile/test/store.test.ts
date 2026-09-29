@@ -126,6 +126,20 @@ describe('근무표 저장소 (서버가 원본)', () => {
     assert.deepEqual(srv.calls, ['put r12', 'list'], '방금 쓴 근무표는 다시 받지 않는다')
   })
 
+  test('패스키로 다른 계정에 들어가면, 그 계정에 없는 달만 옮기고 그 계정 기준으로 맞춘다', async () => {
+    const other = fakeServer([roster('r10', 10, '사아자'), roster('r12', 12)])
+    const cache = memoryCache([roster('r10', 10), roster('r11', 11)])
+    const meta = memoryMeta()
+    meta.setVersions({ r10: 'old', r11: 'old' })
+    const store = createStore({ api: other.api, cache, meta, hasIdentity: async () => true })
+    const result = await store.adopt(await cache.list())
+    assert.equal(result.moved, 1)
+    assert.deepEqual([...other.docs.keys()].sort(), ['r10', 'r11', 'r12'])
+    assert.equal(other.docs.get('r10')!.roster.nurses[0].name, '사아자', '같은 달은 그 계정 것을 남긴다')
+    assert.deepEqual(cache.ids(), ['r10', 'r11', 'r12'])
+    assert.equal(result.items.find(i => i.roster.id === 'r10')!.roster.nurses[0].name, '사아자')
+  })
+
   test('upsert 는 같은 근무표를 바꾸고 최근 달 순으로 정렬한다', () => {
     const items = upsert(upsert([roster('r10', 10)], roster('r12', 12)), roster('r10', 10, '사아자'))
     assert.deepEqual(items.map(i => [i.roster.id, i.roster.nurses[0].name]), [['r12', '가나다'], ['r10', '사아자']])

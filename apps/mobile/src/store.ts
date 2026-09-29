@@ -46,8 +46,7 @@ export function createStore(deps: {
     meta.setMigrated()
   }
 
-  return {
-    async sync(): Promise<SyncResult> {
+  async function sync(): Promise<SyncResult> {
       const cached = await cache.list()
       if (!cached.length && !(await deps.hasIdentity())) {
         meta.setMigrated()
@@ -75,6 +74,26 @@ export function createStore(deps: {
         console.warn('roster sync failed', e)
         return { items: cached, online: false }
       }
+  }
+
+  return {
+    sync,
+
+    /**
+     * 이 기기가 다른 계정(패스키로 찾은 계정)으로 바뀐 직후에 부른다. 이 기기에 있던 근무표 중
+     * 그 계정에 없는 달만 옮기고(같은 달은 그 계정 것을 남긴다), 그 계정 기준으로 사본을 맞춘다.
+     */
+    async adopt(previous: LocalRoster[]): Promise<SyncResult & { moved: number }> {
+      meta.setVersions({})
+      meta.setMigrated()
+      const remote = new Set((await api.list()).map(r => r.id))
+      let moved = 0
+      for (const data of previous) {
+        if (remote.has(data.roster.id)) continue
+        await api.put(data)
+        moved++
+      }
+      return { ...(await sync()), moved }
     },
 
     /** 서버에 쓰고, 성공하면 사본도 고친다. 실패하면 아무것도 바뀌지 않는다. */
