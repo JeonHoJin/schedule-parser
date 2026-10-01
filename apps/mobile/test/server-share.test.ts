@@ -42,15 +42,30 @@ describe('공유 링크', () => {
     assert.throws(() => toLocal(view()), '칸이 모자란 근무표는 거절')
   })
 
+  test('남이 보낸 근무표는 실제 근무표에 없을 길이·연도면 받지 않는다', () => {
+    const now = new Date('2027-01-15T00:00:00Z')
+    assert.doesNotThrow(() => toLocal(fullView(), now))
+    const longName = fullView(); longName.roster.nurses[0].name = '가'.repeat(31)
+    assert.throws(() => toLocal(longName, now), /이름/)
+    const farYear = fullView(); farYear.roster.year = 2200
+    assert.throws(() => toLocal(farYear, now), /연도/)
+    const longRaw = fullView(); longRaw.roster.cells[0].raw = 'x'.repeat(21)
+    assert.throws(() => toLocal(longRaw, now), /근무 표기/)
+    const manyFlags = fullView(); manyFlags.roster.cells[0].flags = ['a', 'b', 'c', 'd', 'e', 'f']
+    assert.throws(() => toLocal(manyFlags, now), /근무 표시/)
+  })
+
   test('로그인 없이 읽고, 만료·중지된 링크는 따로 알린다', async () => {
     const seen: string[] = []
     const ok = await fetchShared(TOKEN, (async (url: string, init?: RequestInit) => {
       seen.push(url)
-      assert.equal(init, undefined, '인증 헤더 없이 요청')
+      assert.equal(init?.method, 'POST')
+      assert.equal((init?.headers as Record<string, string>).authorization, undefined, '로그인 없이 요청')
+      assert.deepEqual(JSON.parse(String(init?.body)), { t: TOKEN }, '토큰은 주소가 아니라 본문으로')
       return new Response(JSON.stringify(fullView()), { status: 200 })
     }) as typeof fetch)
     assert.equal(ok.expiresAt, '2027-03-01T00:00:00Z')
-    assert.match(seen[0], /\/op\/roster-shared\?t=/)
+    assert.match(seen[0], /\/op\/roster-shared$/)
     await assert.rejects(fetchShared(TOKEN, (async () => new Response('{}', { status: 404 })) as typeof fetch), ShareGone)
   })
 })

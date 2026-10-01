@@ -42,8 +42,25 @@ export function shareUrl(token: string, page: string = location.href): string {
   return `${base.origin}${base.pathname}#share=${token}`
 }
 
+/** 남이 보낸 근무표라 내 근무표보다 엄격하게 본다: 실제 근무표에 없을 길이·연도면 받지 않는다. */
+export const SHARED_LIMITS = { name: 30, ward: 40, raw: 20, flag: 20, flags: 5, years: 2 }
+
+function checkShared(view: SharedView, now = new Date()): void {
+  const r = view.roster
+  const bad = (what: string) => { throw new Error(`공유 근무표의 ${what}이(가) 올바르지 않아요.`) }
+  if (Math.abs(r.year - now.getFullYear()) > SHARED_LIMITS.years) bad('연도')
+  if (typeof r.ward !== 'string' || r.ward.length > SHARED_LIMITS.ward) bad('병동 이름')
+  for (const n of r.nurses) if (typeof n.name !== 'string' || n.name.length > SHARED_LIMITS.name) bad('이름')
+  for (const c of r.cells) {
+    if (typeof c.raw !== 'string' || c.raw.length > SHARED_LIMITS.raw) bad('근무 표기')
+    if (!Array.isArray(c.flags) || c.flags.length > SHARED_LIMITS.flags
+      || c.flags.some(f => typeof f !== 'string' || f.length > SHARED_LIMITS.flag)) bad('근무 표시')
+  }
+}
+
 /** 공유 근무표를 앱의 근무표 모양으로. 이름이 비어 있는 줄은 순서로 부른다. */
-export function toLocal(view: SharedView): LocalRoster {
+export function toLocal(view: SharedView, now = new Date()): LocalRoster {
+  checkShared(view, now)
   const r = view.roster
   return parseBackup({
     version: 1,
@@ -62,7 +79,12 @@ export class ShareGone extends Error {
 
 /** 로그인 없이 공유 근무표를 읽는다. 기기 키도 만들지 않는다. */
 export async function fetchShared(token: string, fetcher: typeof fetch = fetch): Promise<{ data: LocalRoster; expiresAt: string }> {
-  const res = await fetcher(`${API_BASE}/op/roster-shared?t=${encodeURIComponent(token)}`)
+  // The token goes in the body, never in a URL that logs could keep.
+  const res = await fetcher(`${API_BASE}/op/roster-shared`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ t: token }),
+  })
   if (res.status === 404) throw new ShareGone()
   if (!res.ok) throw new ServerError(res.status, `HTTP ${res.status}`)
   const view = await res.json() as SharedView

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import { View } from 'react-native'
 import type { IsoDate } from '@sp/domain'
 import { CalendarScreen } from './src/screens/CalendarScreen'
@@ -29,13 +29,46 @@ export default function Root() {
     addEventListener('hashchange', onHash)
     return () => removeEventListener('hashchange', onHash)
   }, [])
-  return token ? <SharedApp key={token} token={token} /> : <App />
+  return <Recover>{token ? <SharedApp key={token} token={token} /> : <App />}</Recover>
+}
+
+/** 화면을 그리다 예외가 나도 하얀 화면 대신 되돌릴 방법을 보여 준다. */
+class Recover extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(e: unknown) { console.warn('render failed', e) }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <main className="local-app">
+        <header className="local-header"><h1>근무표</h1></header>
+        <div className="offline-banner" role="alert">
+          <span>화면을 그리다 문제가 생겼어요. 다시 불러와도 같으면 공유받은 근무표 중 하나가 문제일 수 있어요.</span>
+            <button type="button" className="primary" onClick={() => location.reload()}>다시 불러오기</button>
+            <button type="button" onClick={() => {
+              try { localStorage.removeItem(SELECTED_KEY) } catch { /* 무시 */ }
+              try { indexedDB.deleteDatabase(`schedule-parser-received:${new URL('.', location.href).pathname}`) } catch { /* 무시 */ }
+              history.replaceState(null, '', location.pathname)
+              location.reload()
+            }}>공유받은 근무표 비우고 다시 열기</button>
+        </div>
+      </main>
+    )
+  }
 }
 
 const isShared = (id: string) => id.startsWith('received-')
 const until = (iso: string) => {
   const d = new Date(iso)
   return `${d.getMonth() + 1}월 ${d.getDate()}일`
+}
+
+const SELECTED_KEY = 'schedule-parser:selected'
+function loadSelected(): string | null {
+  try { return localStorage.getItem(SELECTED_KEY) } catch { return null }
+}
+function saveSelected(id: string) {
+  try { localStorage.setItem(SELECTED_KEY, id) } catch { /* 다음엔 최근 근무표가 열린다 */ }
 }
 
 const PASSKEY_KNOWN = 'schedule-parser:passkey'
@@ -75,6 +108,7 @@ function App() {
   const [nudgeHidden, setNudgeHidden] = useState(nudgeDismissed)
   const [recs, setRecs] = useState<Received[]>([])
   const [recsLoaded, setRecsLoaded] = useState(false)
+  const [cacheLoaded, setCacheLoaded] = useState(false)
   const [addingShared, setAddingShared] = useState(false)
   const onlineRef = useRef(true)
   // 내 근무표와 공유받은 근무표를 한 목록으로(최근 달 먼저, 같은 달이면 내 것 먼저).
@@ -97,9 +131,14 @@ function App() {
   // 기다린다(방금 추가한 공유 근무표를 고른 상태일 수 있다).
   const ids = entries.map(e => e.roster.id).join(',')
   useEffect(() => {
-    if (!recsLoaded) return
-    if (!entries.some(e => e.roster.id === selected)) setSelected(entries[0]?.roster.id ?? '')
-  }, [ids, recsLoaded])
+    if (!recsLoaded || !cacheLoaded) return
+    if (entries.some(e => e.roster.id === selected)) return
+    // 마지막으로 보던 근무표, 없으면 내 최근 근무표(공유받은 것보다 먼저).
+    const last = loadSelected()
+    const pick = entries.find(e => e.roster.id === last) ?? items[0] ?? entries[0]
+    setSelected(pick?.roster.id ?? '')
+  }, [ids, recsLoaded, cacheLoaded])
+  useEffect(() => { if (selected) saveSelected(selected) }, [selected])
 
   const show = (next: LocalRoster[]) => setItems(next)
 
@@ -120,7 +159,7 @@ function App() {
 
   useEffect(() => {
     // 사본을 먼저 보여 주고(빠르게), 서버와 맞춘 결과로 바꾼다.
-    readCache().then(cached => { if (cached.length) show(cached) }).catch(() => {})
+    readCache().then(cached => { if (cached.length) show(cached) }).catch(() => {}).finally(() => setCacheLoaded(true))
     received.list().then(setRecs).catch(() => {}).finally(() => setRecsLoaded(true))
     // 공유 링크 화면에서 "내 목록에 추가"로 넘어왔으면 그 근무표를 연다.
     try {

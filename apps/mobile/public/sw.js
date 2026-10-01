@@ -8,8 +8,11 @@
  *
  * VERSION 을 바꾸면 이전 캐시가 삭제되고 자동으로 새 SW 가 활성화된다.
  */
-const VERSION = 'v1'
-const RUNTIME = `sp-runtime-${VERSION}`
+const PREFIX = 'sp-runtime-'
+const VERSION = 'v2'
+const RUNTIME = `${PREFIX}${VERSION}`
+// The origin (jeonhojin.github.io) is shared with every other Pages site of the account, so only
+// ever read and delete this app's own caches: caches.match() would search all of them.
 
 self.addEventListener('install', event => {
   // 새 SW 를 즉시 대기 상태에서 벗어나게 한다
@@ -19,7 +22,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const names = await caches.keys()
-    await Promise.all(names.filter(n => n !== RUNTIME).map(n => caches.delete(n)))
+    await Promise.all(names.filter(n => n.startsWith(PREFIX) && n !== RUNTIME).map(n => caches.delete(n)))
     await self.clients.claim()
   })())
 })
@@ -50,14 +53,14 @@ async function networkFirst(request) {
     }
     return res
   } catch {
-    const cached = await caches.match(request)
+    const cached = await (await caches.open(RUNTIME)).match(request)
     if (cached) return cached
     throw new Error('오프라인 · 캐시된 페이지 없음')
   }
 }
 
 async function cacheFirst(request) {
-  const cached = await caches.match(request)
+  const cached = await (await caches.open(RUNTIME)).match(request)
   if (cached) return cached
   const res = await fetch(request)
   if (res.ok && res.type === 'basic') {

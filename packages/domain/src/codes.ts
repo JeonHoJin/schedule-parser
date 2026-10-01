@@ -63,7 +63,8 @@ export function parseCode(raw: string): ParsedCode {
   const base = starred ? text.slice(0, -1).trim() : text
   const flags = starred ? ['ASTERISK'] : []
 
-  const kind = CODE_MAP[base] ?? 'OTHER'
+  // Own keys only: text like "constructor" must not pick up Object.prototype members.
+  const kind = Object.hasOwn(CODE_MAP, base) ? CODE_MAP[base] : 'OTHER'
   if (starred && kind !== 'EMPTY' && !isCycleSlot(kind)) {
     return { kind: 'OFF', flags }
   }
