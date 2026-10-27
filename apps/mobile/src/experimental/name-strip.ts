@@ -1,13 +1,10 @@
 /**
  * 검출된 격자에서 각 간호사 행의 이름 칸과 사번 칸을 각각 잘라 <canvas> 로 만든다.
  *
- * 이전 버전은 [이미지 왼쪽 끝 ~ day1] 전체를 한 조각으로 잘라 Tesseract 에 넘겼는데,
- * 그러면 이름과 사번이 뒤섞여 인식률이 크게 떨어졌다. 사번 열 위치는
- * `packages/recognize/src/digits.ts` 의 `empnoBox` 와 같은 규칙으로 계산해서
- * 그 왼쪽만 이름 칸으로 잡는다.
+ * 이름·사번 위치는 공통 격자 해석 결과를 사용한다.
+ * 사번이 없는 양식은 빈 조각을 보내 근무 칸을 사번으로 읽지 않게 한다.
  */
 import type { PreparedSheet } from '@sp/recognize'
-import { empnoBox } from '@sp/recognize'
 import type { Box, Rgba } from '@sp/vision'
 
 export interface RowStrips {
@@ -48,46 +45,37 @@ function cropToCanvas(src: Rgba, x: number, y: number, w: number, h: number): HT
   return canvas
 }
 
-/** prepareEmpnoColumn 과 동일 규칙으로 사번 열 픽셀 너비를 계산 */
-function empnoWidth(sheet: PreparedSheet): number {
-  const matrix = sheet.detect.lattice.matrix
-  const detected = sheet.nurseRows.map(r => matrix[r][0]).filter(b => b.detected).map(b => b.w)
-  if (detected.length) {
-    const sorted = [...detected].sort((a, b) => a - b)
-    return sorted[sorted.length >> 1]
-  }
-  return matrix[sheet.nurseRows[0]][0].w
-}
-
+/** Shared identity boxes keep name-only layouts from treating day 1 as an employee ID. */
 export function rowStrips(sheet: PreparedSheet): RowStrips[] {
   const work = sheet.detect.work
-  const matrix = sheet.detect.lattice.matrix
-  const width = empnoWidth(sheet)
-  const gap = 6
+  const padded = (box: Box): Box => {
+    const x = Math.max(0, Math.round(box.x - 3))
+    const y = Math.max(0, Math.round(box.y - 3))
+    return {
+      x, y,
+      w: Math.max(1, Math.min(work.width - x, Math.round(box.x + box.w + 3) - x)),
+      h: Math.max(1, Math.min(work.height - y, Math.round(box.y + box.h + 3) - y)),
+    }
+  }
 
   return sheet.nurseRows.map(row => {
-    const day1 = sheet.boxOf(row, 1)
-    const latticeCell = matrix[row][0]
-    const empno = empnoBox(day1, latticeCell, width, gap)
-
-    // A few pixels of margin on every side: OCR misses glyphs that touch the crop edge.
-    const pad = 3
-    const nameX = 0
-    const nameY = Math.max(0, Math.round(empno.y - pad))
-    const nameW = Math.max(1, Math.round(empno.x - nameX - 2))
-    const nameH = Math.max(1, Math.min(work.height - nameY, Math.round(empno.h + pad * 2)))
-
-    const empX = Math.max(0, Math.round(empno.x - pad))
-    const empY = Math.max(0, Math.round(empno.y - pad))
-    const empW = Math.max(1, Math.min(work.width - empX, Math.round(empno.w + pad * 2)))
-    const empH = Math.max(1, Math.min(work.height - empY, Math.round(empno.h + pad * 2)))
-
+    const identity = sheet.identityBoxOf(row)
+    const nameBox = padded(identity.name)
+    const empnoBox = identity.empno ? padded(identity.empno) : { x: 0, y: 0, w: 1, h: 1 }
+    const empnoCanvas = identity.empno
+      ? cropToCanvas(work, empnoBox.x, empnoBox.y, empnoBox.w, empnoBox.h)
+      : document.createElement('canvas')
+    if (!identity.empno) {
+      empnoCanvas.width = 1
+      empnoCanvas.height = 1
+      const ctx = empnoCanvas.getContext('2d')!
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, 1, 1)
+    }
     return {
       row,
-      nameCanvas: cropToCanvas(work, nameX, nameY, nameW, nameH),
-      empnoCanvas: cropToCanvas(work, empX, empY, empW, empH),
-      nameBox: { x: nameX, y: nameY, w: nameW, h: nameH },
-      empnoBox: { x: empX, y: empY, w: empW, h: empH },
+      nameCanvas: cropToCanvas(work, nameBox.x, nameBox.y, nameBox.w, nameBox.h),
+      empnoCanvas, nameBox, empnoBox,
     }
   })
 }

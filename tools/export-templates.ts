@@ -11,11 +11,11 @@
  *   npx tsx tools/export-templates.ts
  *   → apps/mobile/assets/templates.json 갱신
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   buildDigitTemplates, buildTemplates,
-  prepareEmpnoColumn, prepareSheet, type Template,
+  prepareEmpnoColumn, prepareSheet, type CellLabel, type Template,
 } from '@sp/recognize'
 import { fixture, DAYS } from './sheet'
 import { readJpeg } from './io'
@@ -46,6 +46,15 @@ const fx = fixture()
 
 const sheet = prepareSheet(img, DAYS)
 const cells = buildTemplates(sheet, fx.labels)
+// 다른 양식의 글자도 추가할 수 있다. 이미지·정답은 비공개 fixture 로만 둔다.
+// 예: ... export-templates.ts fixtures/roster-2026-11.jpg fixtures/labels-2026-11.json
+const extras = process.argv.slice(2)
+if (extras.length % 2) throw new Error('추가 템플릿은 이미지 경로와 정답 JSON 경로를 쌍으로 지정하세요.')
+for (let i = 0; i < extras.length; i += 2) {
+  const labels: { days: number; labels: CellLabel[] } = JSON.parse(readFileSync(extras[i + 1], 'utf8'))
+  if (!Number.isInteger(labels.days) || labels.days < 28 || labels.days > 31) throw new Error('정답 JSON 의 days 는 28~31이어야 합니다.')
+  cells.push(...buildTemplates(prepareSheet(readJpeg(extras[i]), labels.days), labels.labels))
+}
 const column = prepareEmpnoColumn(sheet, fx.digits)
 const empnoLabels = fx.templateRows.map(row => ({ row, empNo: fx.empnos[row - 2] }))
 const digits = buildDigitTemplates(sheet, column, empnoLabels)

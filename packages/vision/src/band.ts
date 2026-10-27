@@ -57,10 +57,12 @@ export function locateBand(
   expected: number,
   snapRatio = 0.45,
 ): BandResult | null {
+  if (!Number.isInteger(expected) || expected < 1) return null
   const seed = findUniformSeed(centers)
   if (!seed) return null
 
-  const [s0, s1] = seed
+  const s0 = seed[0], s1 = Math.min(seed[1], s0 + expected - 1)
+  if (s1 === s0) return null
   const n = s1 - s0 + 1
   // 씨앗 구간에 최소자승 직선을 맞춘다
   let sk = 0, sx = 0, skk = 0, skx = 0
@@ -120,5 +122,5 @@ export function locateBand(
   const synthesized = new Map<number, number>()
   keys.forEach((k, i) => { if (slots.get(k) === -1) synthesized.set(i, predict(k)) })
 
-  return { columns, synthesized, pitch, seed }
+  return { columns, synthesized, pitch, seed: [s0, s1] }
 }

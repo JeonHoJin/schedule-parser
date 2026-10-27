@@ -7,7 +7,7 @@ import {
   DIGIT_FEATURE, empnoBox, empnoInk, matchKnownEmpno, readEmpno, segmentDigitColumn,
 } from './digits'
 import { featureFromInk, type InkMask } from './feature'
-import { cellFeature, type FeatureConfig } from './feature'
+import { cellFeature, cellInk, type FeatureConfig } from './feature'
 import { cellHighlight, type Highlight } from './highlight'
 import { classify, type Template } from './template'
 
@@ -27,8 +27,14 @@ export interface PreparedSheet {
   days: number
   /** 간호사 행 인덱스 (헤더 2행을 제외한 나머지) */
   nurseRows: number[]
+  /** 사번 열이 없는 신청표에서는 숫자를 억지로 읽지 않는다. */
+  hasEmpno: boolean
+  dateHeaderConfirmed: boolean
+  identityBoxOf(row: number): { name: Box; empno: Box | null }
   boxOf(row: number, day: number): LatticeCell
 }
+
+export class DateHeaderError extends Error {}
 
 export interface SheetCell {
   row: number
@@ -53,16 +59,89 @@ export function prepareSheet(img: Rgba, days: number): PreparedSheet {
   const { lattice } = detect
   const weights = lattice.colAnchors.map(
     (_, c) => lattice.matrix.filter(row => row[c].detected).length)
-  const band = locateBand(lattice.colAnchors, weights, days)
+  let band = locateBand(lattice.colAnchors, weights, days)
+  // 이전 달 칸은 날짜·요일 헤더가 비어 있다. 날짜 또는 요일이 인쇄된
+  // 연속 N칸을 우선하여, 이전 달/마지막 여백 칸을 일자로 읽지 않는다.
+  const printed = lattice.colAnchors.map((_, c) =>
+    [0, 1].some(r => lattice.matrix[r]?.[c]
+      && cellInk(detect.gray, lattice.matrix[r][c]).ink >= 0.02))
+  // 내부 헤더 한 칸이 흐려져도 양쪽 헤더와 월의 일수로 그 위치를 유지한다.
+  const header = printed.map((ink, c) => ink || !!(printed[c - 1] && printed[c + 1]))
+  let headerMatched = false
+  let sheetDays = days
+  let partialHeaderStart: number | undefined
+  for (let start = 0; start < header.length; start++) {
+    if (!header[start] || (start > 0 && header[start - 1])) continue
+    let end = start
+    while (header[end]) end++
+    if (start >= 2 && end < header.length && end - start >= days - 2 && end - start < days) {
+      partialHeaderStart = start
+    }
+    const headerDays = end - start
+    // 최초 월 추정이 31일이어도, 온전한 30일 헤더는 제목 OCR 까지 진행한다.
+    // 마지막 여백이 한 칸이고 그 앞의 이전 달 칸이 좁아야 경계가 온전하다.
+    const width = (c: number) => lattice.matrix[Math.min(2, lattice.rows - 1)]?.[c]?.w ?? 0
+    const shorterMonth = headerDays >= 28 && headerDays < days && end === header.length - 1
+      && (start < 2 || width(start - 1) < width(start) * 0.85)
+    if (headerDays !== days && !shorterMonth) continue
+    const headerBand = locateBand(lattice.colAnchors.slice(start, end), weights.slice(start, end), headerDays)
+    if (headerBand && !headerBand.synthesized.size) {
+      band = { ...headerBand, columns: headerBand.columns.map(c => c + start), seed: [start, end - 1] }
+      headerMatched = true
+      sheetDays = headerDays
+      break
+    }
+  }
+  if (!headerMatched && partialHeaderStart !== undefined && band?.columns[0] !== partialHeaderStart) {
+    throw new DateHeaderError('날짜 헤더가 흐려 일자 시작점을 확정하지 못했습니다. 날짜·요일 줄이 보이도록 다시 잘라 주세요.')
+  }
   if (!band) throw new Error('일자 열을 찾지 못했습니다')
+
+  const firstDay = band.columns[0]
+  const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1] ?? 0
+  const body = lattice.matrix.slice(2)
+  const empnoCol = firstDay - 1
+  const dayWidth = median(body.map(r => r[firstDay]?.w ?? 0))
+  const empnoWidth = median(body.map(r => r[empnoCol]?.w ?? 0))
+  // 6자리 사번 칸은 날짜 칸보다 넓고, 이전 달의 근무 칸은 날짜 칸과 비슷하다.
+  const hasEmpno = empnoCol >= 0 && empnoWidth > dayWidth * 1.4
+  const boxOf = (row: number, day: number) => lattice.matrix[row][band!.columns[day - 1]]
+  const rawIdentityBoxOf = (row: number): { name: Box; empno: Box | null } => {
+    const left = lattice.matrix[row][hasEmpno ? empnoCol : 0]
+    const empno = hasEmpno ? empnoBox(boxOf(row, 1), left, empnoWidth) : null
+    const right = Math.max(1, Math.round((empno?.x ?? left.x) - 2))
+    // 이름 왼쪽의 세로 괘선을 찾아 순번이 이름 OCR 에 섞이지 않게 한다.
+    const y0 = Math.max(0, Math.round(left.y - left.h))
+    const y1 = Math.min(detect.work.height, Math.round(left.y + left.h * 2))
+    let x0 = 0
+    for (let x = 0; x < right - 8; x++) {
+      let ink = 0
+      for (let y = y0; y < y1; y++) if (detect.gridMask.data[y * detect.work.width + x]) ink++
+      if (ink > (y1 - y0) * 0.7) x0 = x + 2
+    }
+    return { name: { x: x0, y: left.y, w: Math.max(1, right - x0), h: left.h }, empno }
+  }
+  const identities = new Map(body.map((_, i) => [i + 2, rawIdentityBoxOf(i + 2)]))
+  const nameWidth = median([...identities.values()].map(b => b.name.w))
+  const identityBoxOf = (row: number) => {
+    const identity = identities.get(row)!
+    // 빈 구분 행 뒤에서 괘선이 끊겨도 이름 칸에 순번 열까지 포함하지 않는다.
+    if (!hasEmpno && identity.name.w > nameWidth * 1.15) {
+      const right = identity.name.x + identity.name.w
+      return { ...identity, name: { ...identity.name, x: right - nameWidth, w: nameWidth } }
+    }
+    return identity
+  }
+  const nurseRows = Array.from({ length: Math.max(0, lattice.rows - 2) }, (_, i) => i + 2)
+    .filter(row => hasEmpno || cellInk(detect.gray, identityBoxOf(row).name).ink >= 0.015
+      || band!.columns.some(c => cellInk(detect.gray, lattice.matrix[row][c]).ink >= 0.02))
 
   return {
     detect,
     band,
     rows: lattice.rows,
-    days,
-    nurseRows: Array.from({ length: lattice.rows - 2 }, (_, i) => i + 2),
-    boxOf: (row, day) => lattice.matrix[row][band.columns[day - 1]],
+    days: sheetDays,
+    nurseRows, hasEmpno, dateHeaderConfirmed: headerMatched, identityBoxOf, boxOf,
   }
 }
 
@@ -116,14 +195,9 @@ export interface EmpnoColumn {
 }
 
 export function prepareEmpnoColumn(sheet: PreparedSheet, digits: number): EmpnoColumn {
-  const matrix = sheet.detect.lattice.matrix
-  const detected = sheet.nurseRows.map(r => matrix[r][0]).filter(b => b.detected).map(b => b.w)
-  const width = detected.length
-    ? [...detected].sort((a, b) => a - b)[detected.length >> 1]
-    : matrix[sheet.nurseRows[0]][0].w
-
+  if (!sheet.hasEmpno) return { inks: [], slices: [] }
   const inks = sheet.nurseRows.map(r =>
-    empnoInk(sheet.detect.gray, empnoBox(sheet.boxOf(r, 1), matrix[r][0], width)))
+    empnoInk(sheet.detect.gray, sheet.identityBoxOf(r).empno!))
   return { inks, slices: segmentDigitColumn(inks, digits) }
 }
 
@@ -170,6 +244,9 @@ export function readEmpnoColumn(
   templates: Template[],
   known?: readonly string[],
 ): EmpnoReading[] {
+  if (!sheet.hasEmpno) return sheet.nurseRows.map(row => ({
+    row, read: null, value: null, minScore: 0, needsReview: false,
+  }))
   return sheet.nurseRows.map((row, i) => {
     const r = readEmpno(column.inks[i], column.slices[i], templates)
     if (!known?.length) {

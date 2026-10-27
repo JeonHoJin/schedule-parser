@@ -17,6 +17,16 @@ interface OcrLine {
 export const looksLikeName = (t: string) => /^[가-힣]{2,5}$/.test(t)
 export const looksLikeEmpno = (t: string, digits = 6) => t.length === digits && /^\d+$/.test(t)
 
+/** 이름 뒤의 월 표기만 제거한다. 깨진 괄호나 알 수 없는 문구는 검수에 남긴다. */
+export function normalizeName(text: string): string {
+  const compact = text.replace(/\s+/g, '')
+  if (looksLikeName(compact)) return compact
+  const annotated = compact.match(/^([가-힣]{2,5})\((\d{1,2})월(?:[~∼*-](\d{1,2})월?)?\)$/)
+  if (!annotated) return ''
+  if ([annotated[2], annotated[3]].some(month => month !== undefined && (Number(month) < 1 || Number(month) > 12))) return ''
+  return annotated[1]
+}
+
 /** 한 칸에서 읽힌 줄들을 합친다. 칸 안의 공백은 인쇄 간격일 뿐이라 지운다. */
 export function joinLines(lines: OcrLine[]): CellReading {
   return {

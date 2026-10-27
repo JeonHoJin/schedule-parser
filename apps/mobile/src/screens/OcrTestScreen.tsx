@@ -7,7 +7,7 @@ import { carryMyNurse } from '../roster-edit'
 import { readExifDate } from '../experimental/exif'
 import { fullParse, type FullParseResult } from '../experimental/full-parse'
 import { rowStrips, titleStrips, workToCanvas, type RowStrips } from '../experimental/name-strip'
-import { guessMonth, looksLikeEmpno, looksLikeName, readRows, readSheet, type RowReading } from '../server/ocr'
+import { guessMonth, looksLikeEmpno, normalizeName, readRows, readSheet, type RowReading } from '../server/ocr'
 import { ServerError } from '../server'
 import type { LocalRoster } from '../data'
 
@@ -61,15 +61,15 @@ function buildEdits(parsed: FullParseResult, strips: RowStrips[], readings?: Row
     const e = parsed.empnos[i]
     const name = readings?.[i]?.name
     const empno = readings?.[i]?.empno
-    const serverEmpno = empno && looksLikeEmpno(empno.text) ? empno : undefined
+    const serverEmpno = parsed.sheet.hasEmpno && empno && looksLikeEmpno(empno.text) ? empno : undefined
     return {
       row: strip.row,
       originalId: parsed.roster.nurses[i].id,
-      empno: serverEmpno?.text ?? e?.value ?? '',
-      empnoConfidence: serverEmpno?.confidence ?? e?.minScore ?? 0,
-      empnoNeedsReview: serverEmpno ? false : e?.needsReview ?? true,
+      empno: parsed.sheet.hasEmpno ? serverEmpno?.text ?? e?.value ?? '' : '',
+      empnoConfidence: parsed.sheet.hasEmpno ? serverEmpno?.confidence ?? e?.minScore ?? 0 : 0,
+      empnoNeedsReview: parsed.sheet.hasEmpno && (serverEmpno ? false : e?.needsReview ?? true),
       empnoSource: serverEmpno ? 'server' : 'device',
-      name: name && looksLikeName(name.text) ? name.text : '',
+      name: name ? normalizeName(name.text) : '',
       ocrNameRaw: name?.text ?? '',
       ocrConfidence: name?.confidence ?? 0,
       nameCanvas: strip.nameCanvas,
@@ -227,9 +227,13 @@ export function OcrTestScreen({ existing, onSave, onClose }: {
       if (readings) {
         const names = edits.filter(n => n.name).length
         const empnos = edits.filter(n => n.empnoSource === 'server').length
-        setOcrNote(`서버 인식: 이름 ${names}/${edits.length} · 사번 ${empnos}/${edits.length}. 비어 있거나 노란 칸만 확인해 주세요.`)
+        setOcrNote(parsed.sheet.hasEmpno
+          ? `서버 인식: 이름 ${names}/${edits.length} · 사번 ${empnos}/${edits.length}. 비어 있거나 노란 칸만 확인해 주세요.`
+          : `서버 인식: 이름 ${names}/${edits.length}. 사번이 없는 양식이므로 사번은 비워 두세요. 이름을 확인해 주세요.`)
       } else {
-        setOcrNote('서버 인식을 쓰지 못해, 이 기기에서 읽은 사번만 채웠어요. 이름은 직접 입력해 주세요.')
+        setOcrNote(parsed.sheet.hasEmpno
+          ? '서버 인식을 쓰지 못해, 이 기기에서 읽은 사번만 채웠어요. 이름은 직접 입력해 주세요.'
+          : '서버 인식을 쓰지 못했어요. 이름을 직접 입력하고, 사번은 비워 두세요.')
       }
       if (source !== 'title') setEditPeriod(use)
       setTimings([

@@ -8,6 +8,7 @@ import { buildRoster, type Roster } from '@sp/domain'
 import {
   prepareEmpnoColumn, prepareSheet, readEmpnoColumn, readSheet,
   toRosterInput, type PreparedSheet, type Template, type EmpnoReading, type SheetCell,
+  DateHeaderError,
 } from '@sp/recognize'
 import type { Rgba } from '@sp/vision'
 import templatesJson from '../../assets/templates.json'
@@ -88,16 +89,24 @@ export function fullParse(img: Rgba, opts: FullParseOptions): FullParseResult {
   // 실패하면 90/270 도 시도.
   const candidates: Array<0 | 90 | 180 | 270> = [0, 180, 90, 270]
   let best: FullParseResult | null = null
+  let failure: unknown
+  let headerFailure: DateHeaderError | undefined
   for (const r of candidates) {
     try {
       const one = parseOne(rotateRgba(img, r), opts, r)
       if (!best || one.score > best.score) best = one
       // 첫 두 시도(0/180)에서 이미 충분히 좋으면 90/270 은 건너뜀
-      if (best.score > 400 && r === 180) return best
-    } catch {
+      if (best.score > 400 && r === 180) {
+        if (headerFailure && !best.sheet.dateHeaderConfirmed) throw headerFailure
+        return best
+      }
+    } catch (error) {
+      failure ??= error
+      if (error instanceof DateHeaderError) headerFailure = error
       // 회전한 이미지에서 격자 검출이 실패할 수 있다 — 다음 후보로
     }
   }
-  if (!best) throw new Error('4가지 회전 모두 격자 검출 실패')
+  if (headerFailure && !best?.sheet.dateHeaderConfirmed) throw headerFailure
+  if (!best) throw new Error(failure instanceof Error ? failure.message : '4가지 회전 모두 격자 검출 실패')
   return best
 }
